@@ -1,0 +1,17 @@
+{
+  "name": "Dashboard Logístico Pro",
+  "version": "1.0.0",
+  "description": "Análisis de carga (KPI), utilización y mapa de calor de ralentí.",
+  "url": "index.html",
+  "icon": "icon.png",
+  "supportEmail": "soporte@tuempresa.com",
+  "items": [
+    {
+      "url": "index.html",
+      "text": "Dashboard Logístico",
+      "menu": "Activity_Menu_Link",
+      "icon": "icon.png"
+    }
+  ],
+  "isService": false
+}
