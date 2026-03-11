@@ -2,7 +2,6 @@ geotab.addin.miDashboard = function (api, state) {
     let chartInstancia = null;
     let todosLosDatosParaExcel = [];
 
-    // --- 1. PROCESAMIENTO DE KILÓMETROS ---
     const procesarKilometros = (dispositivos, registrosPeso, viajes) => {
         const UMBRAL_CARGA_KG = 20000;
         let statsPorCamion = {};
@@ -19,12 +18,8 @@ geotab.addin.miDashboard = function (api, state) {
 
         viajes.forEach(viaje => {
             if (!statsPorCamion[viaje.device.id]) return;
-
             const pesosDelCamion = pesosPorCamion[viaje.device.id] || [];
-            const pesoAsociado = pesosDelCamion
-                .filter(p => new Date(p.dateTime) <= new Date(viaje.stop))
-                .pop(); 
-
+            const pesoAsociado = pesosDelCamion.filter(p => new Date(p.dateTime) <= new Date(viaje.stop)).pop();
             const pesoKg = pesoAsociado ? (pesoAsociado.data / 1000) : 0;
 
             if (pesoKg >= UMBRAL_CARGA_KG) {
@@ -34,16 +29,11 @@ geotab.addin.miDashboard = function (api, state) {
             }
         });
 
-        // Filtrar y ordenar de MAYOR a MENOR por KM EN VACÍO
         let flotaCompleta = Object.values(statsPorCamion).filter(v => (v.kmConCarga + v.kmEnVacio) > 0);
         todosLosDatosParaExcel = flotaCompleta.sort((a, b) => b.kmEnVacio - a.kmEnVacio);
-
-        // EXTRAER EXACTAMENTE EL TOP 10
-        let top10 = todosLosDatosParaExcel.slice(0, 10);
-        dibujarGrafico(top10);
+        dibujarGrafico(todosLosDatosParaExcel.slice(0, 10));
     };
 
-    // --- 2. GRÁFICO (MÁS AMPLIO Y LEGIBLE) ---
     const dibujarGrafico = (datosTop10) => {
         const ctx = document.getElementById('graficoRanking').getContext('2d');
         if (chartInstancia) chartInstancia.destroy();
@@ -53,105 +43,64 @@ geotab.addin.miDashboard = function (api, state) {
             data: {
                 labels: datosTop10.map(d => d.nombre),
                 datasets: [
-                    {
-                        label: 'KM EN VACÍO (< 20t)',
-                        data: datosTop10.map(d => Math.round(d.kmEnVacio)),
-                        backgroundColor: '#e74c3c', // Rojo
-                        barThickness: 35 // Barras más gruesas
-                    },
-                    {
-                        label: 'KM CON CARGA (> 20t)',
-                        data: datosTop10.map(d => Math.round(d.kmConCarga)),
-                        backgroundColor: '#2ecc71', // Verde
-                        barThickness: 35
-                    }
+                    { label: 'KM EN VACÍO', data: datosTop10.map(d => Math.round(d.kmEnVacio)), backgroundColor: '#e74c3c', barThickness: 30 },
+                    { label: 'KM CON CARGA', data: datosTop10.map(d => Math.round(d.kmConCarga)), backgroundColor: '#2ecc71', barThickness: 30 }
                 ]
             },
             options: {
-                indexAxis: 'y', // Barras horizontales
+                indexAxis: 'y',
                 responsive: true,
-                maintainAspectRatio: false, // CLAVE: Permite que llene los 600px del HTML
-                layout: {
-                    padding: { left: 10, right: 30, top: 10, bottom: 10 }
-                },
+                maintainAspectRatio: false,
                 scales: {
-                    x: { 
-                        stacked: true, 
-                        title: { display: true, text: 'Kilómetros (km)', font: { size: 14, weight: 'bold' } } 
-                    },
+                    x: { stacked: true, title: { display: true, text: 'Kilómetros (km)' } },
                     y: { 
                         stacked: true, 
-                        ticks: { 
-                            autoSkip: false, // CLAVE: Obliga a mostrar las 10 matrículas, no oculta ninguna
-                            font: { size: 15, weight: 'bold' },
-                            color: '#333'
-                        } 
+                        ticks: { autoSkip: false, font: { size: 13, weight: 'bold' } } 
                     }
                 },
                 plugins: {
-                    legend: { position: 'top', labels: { font: { size: 14 } } },
-                    title: { 
-                        display: true, 
-                        text: 'RANKING: TOP 10 VEHÍCULOS CON MÁS KILÓMETROS EN VACÍO', 
-                        font: { size: 20 },
-                        padding: { bottom: 20 }
-                    }
+                    legend: { position: 'top' },
+                    title: { display: true, text: 'RANKING TOP 10: KM EN VACÍO', font: { size: 18 } }
                 }
             }
         });
     };
 
-    // --- 3. EXCEL ---
     const descargarExcel = () => {
-        if (todosLosDatosParaExcel.length === 0) return alert("No hay datos para exportar.");
-        
+        if (todosLosDatosParaExcel.length === 0) return alert("No hay datos.");
         const dataExcel = todosLosDatosParaExcel.map(d => ({
             "Vehículo": d.nombre,
-            "KM en Vacío": Math.round(d.kmEnVacio),
-            "KM con Carga": Math.round(d.kmConCarga),
-            "Total KM": Math.round(d.kmEnVacio + d.kmConCarga),
-            "% Distancia Rentable": ((d.kmConCarga / (d.kmEnVacio + d.kmConCarga)) * 100).toFixed(2) + "%"
+            "KM Vacío": Math.round(d.kmEnVacio),
+            "KM Carga": Math.round(d.kmConCarga),
+            "% Eficiencia": ((d.kmConCarga / (d.kmEnVacio + d.kmConCarga)) * 100).toFixed(2) + "%"
         }));
-
         const ws = XLSX.utils.json_to_sheet(dataExcel);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Kilometraje por Carga");
-        XLSX.writeFile(wb, "Reporte_KM_Flota.xlsx");
+        XLSX.utils.book_append_sheet(wb, ws, "KM Carga");
+        XLSX.writeFile(wb, "Reporte_KM.xlsx");
     };
 
-    // --- 4. CARGA DE DATOS ---
     const cargarDatos = () => {
         const fromDate = document.getElementById('dateFrom').value + "T00:00:00.000Z";
         const toDate = document.getElementById('dateTo').value + "T23:59:59.000Z";
-
         api.multiCall([
             ["Get", { typeName: "Device" }],
-            ["Get", { 
-                typeName: "StatusData", 
-                search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate: fromDate, toDate: toDate }
-            }],
-            ["Get", { typeName: "Trip", search: { fromDate: fromDate, toDate: toDate } }]
+            ["Get", { typeName: "StatusData", search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate, toDate } }],
+            ["Get", { typeName: "Trip", search: { fromDate, toDate } }]
         ], (results) => {
             procesarKilometros(results[0], results[1], results[2]);
-        }, (err) => {
-            console.error("Error al cargar datos:", err);
-            alert("Error al obtener datos. Revisa la consola.");
-        });
+        }, (err) => console.error(err));
     };
 
-    // --- 5. INICIALIZACIÓN ---
     return {
         initialize: function (api, state, callback) {
             const hoy = new Date();
             const hace30 = new Date();
             hace30.setDate(hoy.getDate() - 30);
-            
             document.getElementById('dateTo').value = hoy.toISOString().split('T')[0];
             document.getElementById('dateFrom').value = hace30.toISOString().split('T')[0];
-            
             document.getElementById('updateBtn').onclick = cargarDatos;
             document.getElementById('exportBtn').onclick = descargarExcel;
-            
             if (callback) callback();
         },
         focus: function () { cargarDatos(); },
