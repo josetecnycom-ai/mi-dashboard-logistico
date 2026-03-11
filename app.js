@@ -29,43 +29,73 @@ geotab.addin.miDashboard = function (api, state) {
             }
         });
 
-        let flotaCompleta = Object.values(statsPorCamion).filter(v => (v.kmConCarga + v.kmEnVacio) > 0);
-        todosLosDatosParaExcel = flotaCompleta.sort((a, b) => b.kmEnVacio - a.kmEnVacio);
-        dibujarGrafico(todosLosDatosParaExcel.slice(0, 10));
+        // 1. Convertir a array y filtrar solo los que tienen movimiento
+        let resultados = Object.values(statsPorCamion).filter(v => (v.kmConCarga + v.kmEnVacio) > 0);
+        
+        // 2. ORDENAR estrictamente por KM en Vacío (Mayor a Menor)
+        resultados.sort((a, b) => b.kmEnVacio - a.kmEnVacio);
+        
+        // Guardar lista completa para el Excel
+        todosLosDatosParaExcel = resultados;
+
+        // 3. SELECCIONAR solo los primeros 10 para el gráfico
+        let top10Inactivos = resultados.slice(0, 10);
+        
+        dibujarGrafico(top10Inactivos);
     };
 
-    const dibujarGrafico = (datosTop10) => {
+    const dibujarGrafico = (datos) => {
         const ctx = document.getElementById('graficoRanking').getContext('2d');
         if (chartInstancia) chartInstancia.destroy();
 
         chartInstancia = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: datosTop10.map(d => d.nombre),
+                labels: datos.map(d => d.nombre),
                 datasets: [
-                    { label: 'KM EN VACÍO', data: datosTop10.map(d => Math.round(d.kmEnVacio)), backgroundColor: '#e74c3c', barThickness: 30 },
-                    { label: 'KM CON CARGA', data: datosTop10.map(d => Math.round(d.kmConCarga)), backgroundColor: '#2ecc71', barThickness: 30 }
+                    { 
+                        label: 'KM EN VACÍO', 
+                        data: datos.map(d => Math.round(d.kmEnVacio)), 
+                        backgroundColor: '#e74c3c',
+                        barPercentage: 0.8, // Controla el ancho de la barra
+                        categoryPercentage: 0.9
+                    },
+                    { 
+                        label: 'KM CON CARGA', 
+                        data: datos.map(d => Math.round(d.kmConCarga)), 
+                        backgroundColor: '#2ecc71',
+                        barPercentage: 0.8,
+                        categoryPercentage: 0.9
+                    }
                 ]
             },
             options: {
                 indexAxis: 'y',
                 responsive: true,
-                maintainAspectRatio: false,
+                maintainAspectRatio: false, // Permite que el gráfico use la altura del CSS
                 scales: {
-                    x: { stacked: true, title: { display: true, text: 'Kilómetros (km)' } },
+                    x: { stacked: true },
                     y: { 
-                        stacked: true, 
-                        ticks: { autoSkip: false, font: { size: 13, weight: 'bold' } } 
+                        stacked: true,
+                        ticks: { 
+                            autoSkip: false,
+                            font: { size: 12, weight: 'bold' } 
+                        } 
                     }
                 },
                 plugins: {
                     legend: { position: 'top' },
-                    title: { display: true, text: 'RANKING TOP 10: KM EN VACÍO', font: { size: 18 } }
+                    title: { 
+                        display: true, 
+                        text: 'RANKING: 10 VEHÍCULOS CON MÁS KM EN VACÍO',
+                        font: { size: 16 }
+                    }
                 }
             }
         });
     };
 
+    // ... (Mantener funciones descargarExcel, cargarDatos e initialize igual que v1.0.5)
     const descargarExcel = () => {
         if (todosLosDatosParaExcel.length === 0) return alert("No hay datos.");
         const dataExcel = todosLosDatosParaExcel.map(d => ({
@@ -77,7 +107,7 @@ geotab.addin.miDashboard = function (api, state) {
         const ws = XLSX.utils.json_to_sheet(dataExcel);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "KM Carga");
-        XLSX.writeFile(wb, "Reporte_KM.xlsx");
+        XLSX.writeFile(wb, "Reporte_KM_v106.xlsx");
     };
 
     const cargarDatos = () => {
