@@ -1,183 +1,93 @@
-geotab.addin.miDashboard = function (api, state) {
-    let chartKmObj = null, chartIdleObj = null, chartUsoObj = null;
-    let dataKm = [], dataIdle = [], dataUso = [];
-    let masterZones = {};
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>Dashboard Logístico Pro v1.0.21</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f4f7; padding: 20px; color: #2c3e50; margin: 0; }
+        .dashboard-container { max-width: 1400px; margin: 0 auto; }
+        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 25px; position: relative; }
+        .loading-overlay { position: absolute; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.85); display:none; flex-direction:column; align-items:center; justify-content:center; z-index:100; border-radius:10px; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .header-title { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #ecf0f1; padding-bottom: 15px; margin-bottom: 20px; }
+        .controls { display: flex; gap: 15px; margin-bottom: 25px; align-items: center; background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .btn { padding: 10px 20px; border-radius: 5px; border: none; font-weight: bold; cursor: pointer; transition: 0.3s; display: flex; align-items: center; gap: 8px; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-excel { background: #27ae60; color: white; font-size: 13px; }
+        .table-premium { width: 100%; border-collapse: collapse; background: white; }
+        .table-premium th { background: #f8f9fa; padding: 12px; border: 1px solid #dee2e6; text-align: left; font-size: 11px; text-transform: uppercase; color: #7f8c8d; }
+        .table-premium td { padding: 12px; border: 1px solid #dee2e6; font-size: 13px; }
+        .num { text-align: right; font-family: 'Consolas', monospace; font-weight: bold; }
+        .bad-row { background-color: #fff5f5; }
+        #v-tag { margin-left: auto; color: #2ecc71; font-weight: 900; background: #eafff2; padding: 6px 18px; border-radius: 50px; border: 1px solid #2ecc71; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <div class="controls">
+            <strong>Rango de Fechas:</strong>
+            <input type="date" id="dateFrom">
+            <input type="date" id="dateTo">
+            <button class="btn btn-primary" id="btnRun">🔄 ACTUALIZAR DASHBOARD</button>
+            <span id="v-tag">v1.0.21 - AUTO 30D</span>
+        </div>
 
-    const toggleL = (id, s) => document.getElementById(id).style.display = s ? 'flex' : 'none';
+        <div class="card">
+            <div class="loading-overlay" id="load-km"><div class="spinner"></div><p>Analizando Pesos y KM...</p></div>
+            <div class="header-title">
+                <h2 style="margin:0;">1. Ranking de Kilómetros y Eficiencia</h2>
+                <button class="btn btn-excel" id="xlsx-km">Excel KM</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                <div style="height: 350px;"><canvas id="chart-km"></canvas></div>
+                <div style="overflow-y: auto; max-height: 350px;">
+                    <table class="table-premium">
+                        <thead><tr><th>Vehículo</th><th class="num">KM Vacío</th><th class="num">Eficiencia</th></tr></thead>
+                        <tbody id="body-km"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
-    // Conversión de decimal 1.5 a "01:30"
-    const formatTime = (decimalHours) => {
-        const totalMinutes = Math.round(decimalHours * 60);
-        const h = Math.floor(totalMinutes / 60);
-        const m = totalMinutes % 60;
-        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-    };
+        <div class="card">
+            <div class="loading-overlay" id="load-idle"><div class="spinner"></div><p>Cruzando paradas con Zonas Geotab...</p></div>
+            <div class="header-title">
+                <h2 style="margin:0;">2. Ralentí Acumulado por Zona</h2>
+                <button class="btn btn-excel" id="xlsx-idle">Excel Ralentí</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                <div style="height: 350px;"><canvas id="chart-idle"></canvas></div>
+                <div style="overflow-y: auto; max-height: 350px;">
+                    <table class="table-premium">
+                        <thead><tr><th>Zona Detectada</th><th class="num">Tiempo (HH:mm)</th></tr></thead>
+                        <tbody id="body-idle"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
-    const getSecs = (ts) => {
-        if (!ts) return 0;
-        if (typeof ts === 'number') return ts;
-        if (ts.totalSeconds) return ts.totalSeconds;
-        if (typeof ts === 'string') {
-            let p = ts.split(':');
-            return p.length === 3 ? (parseFloat(p[0]) * 3600 + parseFloat(p[1]) * 60 + parseFloat(p[2])) : 0;
-        }
-        return 0;
-    };
-
-    const procesarTodo = () => {
-        const f = document.getElementById('dateFrom').value + "T00:00:00.000Z";
-        const t = document.getElementById('dateTo').value + "T23:59:59.000Z";
-        
-        toggleL('load-km', true); toggleL('load-idle', true); toggleL('load-uso', true);
-
-        api.multiCall([
-            ["Get", { typeName: "Device" }],
-            ["Get", { typeName: "StatusData", search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate: f, toDate: t } }],
-            ["Get", { typeName: "Trip", search: { fromDate: f, toDate: t } }],
-            ["Get", { typeName: "Zone" }]
-        ], (results) => {
-            const [devices, weights, trips, zones] = results;
-            
-            // Mapear Nombres de Zona
-            masterZones = {};
-            zones.forEach(z => { masterZones[z.id] = z.name; });
-
-            // --- 1. LÓGICA KM ---
-            dataKm = devices.map(d => {
-                let vk = 0, ck = 0;
-                let dWeights = weights.filter(w => w.device.id === d.id);
-                trips.filter(tr => tr.device.id === d.id).forEach(tr => {
-                    let w = dWeights.filter(dw => new Date(dw.dateTime) <= new Date(tr.stop)).pop();
-                    if (w && (w.data / 1000) >= 20000) ck += tr.distance; else vk += tr.distance;
-                });
-                return { name: d.name, vk: Math.round(vk), ck: Math.round(ck), ef: ((ck/(vk+ck+0.1))*100).toFixed(1) + "%" };
-            }).filter(i => (i.vk + i.ck) > 0).sort((a,b) => b.vk - a.vk);
-            renderKM(dataKm);
-            toggleL('load-km', false);
-
-            // --- 2. LÓGICA USO (NUEVA) ---
-            dataUso = devices.map(d => {
-                let vList = trips.filter(tr => tr.device.id === d.id && tr.distance > 0.1);
-                let diasUnicos = new Set(vList.map(v => v.start.split('T')[0]));
-                let totalKm = vList.reduce((acc, v) => acc + v.distance, 0);
-                let nDias = diasUnicos.size;
-                return { 
-                    name: d.name, 
-                    dias: nDias, 
-                    kmDia: nDias > 0 ? (totalKm / nDias).toFixed(1) : 0, 
-                    total: Math.round(totalKm) 
-                };
-            }).sort((a,b) => b.total - a.total);
-            renderUso(dataUso);
-            toggleL('load-uso', false);
-
-            // --- 3. LÓGICA RALENTÍ POR ZONA ---
-            let idleTrips = trips.filter(tr => getSecs(tr.idlingDuration) > 0 && tr.stopPoint);
-            if (idleTrips.length === 0) {
-                renderIdle([]); toggleL('load-idle', false);
-            } else {
-                let coordsMap = new Map();
-                idleTrips.forEach(tr => {
-                    let key = tr.stopPoint.x.toFixed(4) + "," + tr.stopPoint.y.toFixed(4);
-                    tr._ckey = key;
-                    if (!coordsMap.has(key)) coordsMap.set(key, { x: tr.stopPoint.x, y: tr.stopPoint.y });
-                });
-                let geoCalls = [];
-                let uCoords = Array.from(coordsMap.values());
-                for (let i = 0; i < uCoords.length; i += 400) geoCalls.push(["GetAddresses", { coordinates: uCoords.slice(i, i + 400) }]);
-
-                api.multiCall(geoCalls, (geoResults) => {
-                    let allAddrs = [].concat(...geoResults);
-                    let resolver = new Map();
-                    Array.from(coordsMap.keys()).forEach((key, index) => {
-                        let addr = allAddrs[index];
-                        let zName = (addr && addr.zones && addr.zones.length > 0) ? (masterZones[addr.zones[0].id] || "Zona") : "Fuera de Zona";
-                        resolver.set(key, zName);
-                    });
-                    let res = {};
-                    idleTrips.forEach(tr => {
-                        let z = resolver.get(tr._ckey) || "Fuera de Zona";
-                        res[z] = (res[z] || 0) + (getSecs(tr.idlingDuration) / 3600);
-                    });
-                    dataIdle = Object.keys(res).map(k => ({ zona: k, val: res[k], txt: formatTime(res[k]) })).sort((a,b) => b.val - a.val);
-                    renderIdle(dataIdle);
-                    toggleL('load-idle', false);
-                });
-            }
-        });
-    };
-
-    const renderKM = (d) => {
-        const ctx = document.getElementById('chart-km').getContext('2d');
-        if (chartKmObj) chartKmObj.destroy();
-        chartKmObj = new Chart(ctx, {
-            type: 'bar',
-            data: { labels: d.slice(0,10).map(i => i.name), datasets: [{ label: 'KM Vacío', data: d.slice(0,10).map(i => i.vk), backgroundColor: '#e74c3c' }, { label: 'KM Carga', data: d.slice(0,10).map(i => i.ck), backgroundColor: '#2ecc71' }] },
-            options: { maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } }
-        });
-        document.getElementById('body-km').innerHTML = d.slice(0,15).map(i => `<tr><td>${i.name}</td><td class="num">${i.vk}</td><td class="num">${i.ef}</td></tr>`).join('');
-    };
-
-    const renderIdle = (d) => {
-        const ctx = document.getElementById('chart-idle').getContext('2d');
-        if (chartIdleObj) chartIdleObj.destroy();
-        chartIdleObj = new Chart(ctx, {
-            type: 'doughnut',
-            data: { labels: d.slice(0,5).map(i => i.zona), datasets: [{ data: d.slice(0,5).map(i => i.val.toFixed(2)), backgroundColor: ['#3498db', '#2ecc71', '#f1c40f', '#e67e22', '#95a5a6'] }] },
-            options: { maintainAspectRatio: false }
-        });
-        document.getElementById('body-idle').innerHTML = d.map(i => `<tr><td><strong>${i.zona}</strong></td><td class="num">${i.txt}</td></tr>`).join('');
-    };
-
-    const renderUso = (d) => {
-        const ctx = document.getElementById('chart-uso').getContext('2d');
-        if (chartUsoObj) chartUsoObj.destroy();
-        chartUsoObj = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: d.slice(0,12).map(i => i.name),
-                datasets: [
-                    { label: 'KM Totales', data: d.slice(0,12).map(i => i.total), backgroundColor: 'rgba(52, 152, 219, 0.5)', yAxisID: 'y' },
-                    { label: 'Días Activos', data: d.slice(0,12).map(i => i.dias), type: 'line', borderColor: '#e67e22', tension: 0.3, yAxisID: 'y1' }
-                ]
-            },
-            options: { maintainAspectRatio: false, scales: { y: { type: 'linear', position: 'left' }, y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false } } } }
-        });
-        document.getElementById('body-uso').innerHTML = d.map(i => `
-            <tr class="${i.dias === 0 ? 'bad-row' : ''}">
-                <td><strong>${i.name}</strong> ${i.dias === 0 ? '⚠️' : ''}</td>
-                <td class="num">${i.dias}</td>
-                <td class="num">${i.kmDia} km/d</td>
-                <td class="num">${i.total}</td>
-            </tr>
-        `).join('');
-    };
-
-    return {
-        initialize: function (api, state, callback) {
-            const h = new Date().toISOString().split('T')[0];
-            document.getElementById('dateTo').value = h;
-            document.getElementById('dateFrom').value = h;
-            document.getElementById('btnRun').onclick = procesarTodo;
-            
-            // Exporters
-            document.getElementById('xlsx-km').onclick = () => {
-                const ws = XLSX.utils.json_to_sheet(dataKm);
-                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "KM");
-                XLSX.writeFile(wb, "Reporte_Eficiencia.xlsx");
-            };
-            document.getElementById('xlsx-idle').onclick = () => {
-                const ws = XLSX.utils.json_to_sheet(dataIdle.map(i => ({ Zona: i.zona, Tiempo: i.txt })));
-                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Ralenti");
-                XLSX.writeFile(wb, "Reporte_Ralenti_Zonas.xlsx");
-            };
-            document.getElementById('xlsx-uso').onclick = () => {
-                const ws = XLSX.utils.json_to_sheet(dataUso);
-                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Uso");
-                XLSX.writeFile(wb, "Reporte_Intensidad_Uso.xlsx");
-            };
-            callback();
-        },
-        focus: function () { procesarTodo(); }
-    };
-};
+        <div class="card">
+            <div class="loading-overlay" id="load-uso"><div class="spinner"></div><p>Calculando actividad de flota...</p></div>
+            <div class="header-title">
+                <h2 style="margin:0;">3. Intensidad de Uso y Disponibilidad</h2>
+                <button class="btn btn-excel" id="xlsx-uso">Excel Uso</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 30px;">
+                <div style="height: 350px;"><canvas id="chart-uso"></canvas></div>
+                <div style="overflow-y: auto; max-height: 350px;">
+                    <table class="table-premium">
+                        <thead>
+                            <tr><th>Vehículo</th><th class="num">Días Activos</th><th class="num">Ratio KM/Día</th><th class="num">Total KM</th></tr>
+                        </thead>
+                        <tbody id="body-uso"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
