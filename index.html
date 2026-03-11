@@ -2,48 +2,66 @@
 <html lang="es">
 <head>
     <meta charset="utf-8">
-    <title>Dashboard Logístico Pro v1.0.16</title>
+    <title>Dashboard Logístico Pro v1.0.17</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f4f7f9; padding: 20px; color: #253746; margin: 0; }
-        .dashboard-container { max-width: 1200px; margin: 0 auto; }
+        .dashboard-container { max-width: 1300px; margin: 0 auto; }
         .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 25px; position: relative; }
         .loading-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.85); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 10; border-radius: 8px; }
         .spinner { width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #2780e3; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .header-title { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #e0e6eb; padding-bottom: 15px; margin-bottom: 20px; }
-        .controls { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; background: white; padding: 15px; border-radius: 8px; }
-        .btn { padding: 8px 16px; border-radius: 4px; border: none; font-weight: 600; cursor: pointer; }
+        .controls { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .btn { padding: 8px 16px; border-radius: 4px; border: none; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; }
         .btn-primary { background: #2780e3; color: white; }
-        .btn-excel { background: #008767; color: white; }
+        .btn-excel { background: #008767; color: white; font-size: 12px; }
         .table-premium { width: 100%; border-collapse: collapse; }
-        .table-premium th { background: #f8fabb; padding: 12px; border: 1px solid #e0e6eb; text-align: left; font-size: 12px; }
-        .table-premium td { padding: 10px 12px; border: 1px solid #e0e6eb; font-size: 13px; }
-        .num { text-align: right !important; font-family: monospace; }
-        #version-tag { margin-left: auto; font-weight: bold; color: #e74c3c; }
+        .table-premium th { background: #f0f3f6; padding: 12px; border: 1px solid #caced1; text-align: left; font-size: 11px; text-transform: uppercase; }
+        .table-premium td { padding: 10px; border: 1px solid #caced1; font-size: 13px; }
+        .num { text-align: right !important; font-family: 'Consolas', monospace; }
+        #version-tag { margin-left: auto; font-weight: bold; color: #e74c3c; background: #ffeaea; padding: 4px 12px; border-radius: 15px; border: 1px solid #e74c3c; }
     </style>
 </head>
 <body>
     <div class="dashboard-container">
         <div class="controls">
             <strong>Periodo:</strong>
-            <input type="date" id="dateFrom"> <input type="date" id="dateTo">
-            <button class="btn btn-primary" id="btnUpdateMain">Actualizar Datos</button>
-            <span id="version-tag">v1.0.16</span>
+            <input type="date" id="dateFrom">
+            <input type="date" id="dateTo">
+            <button class="btn btn-primary" id="btnUpdateMain">🔄 Actualizar Dashboard</button>
+            <span id="version-tag">VERSIÓN 1.0.17</span>
+        </div>
+
+        <div class="card">
+            <div class="loading-overlay" id="loader-km"><div class="spinner"></div></div>
+            <div class="header-title">
+                <h2 style="margin:0;">1. Ranking de Kilómetros y Eficiencia</h2>
+                <button class="btn btn-excel" id="btnExcelKm">Excel KM</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div style="height: 350px;"><canvas id="chartVacio"></canvas></div>
+                <div style="overflow-y: auto; max-height: 350px;">
+                    <table class="table-premium">
+                        <thead><tr><th>Vehículo</th><th class="num">KM Vacío</th><th>Eficiencia</th></tr></thead>
+                        <tbody id="tablaCuerpo"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
 
         <div class="card">
             <div class="loading-overlay" id="loader-idle"><div class="spinner"></div></div>
             <div class="header-title">
-                <h2>Análisis de Ralentí por Zona Geotab</h2>
-                <button class="btn btn-excel" id="btnExcelIdle">Descargar Excel</button>
+                <h2 style="margin:0;">2. Ralentí por Zona Geotab</h2>
+                <button class="btn btn-excel" id="btnExcelIdle">Excel Ralentí</button>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 30px;">
-                <div class="chart-container"><canvas id="chartIdle"></canvas></div>
-                <div style="overflow-y: auto; max-height: 450px;">
+            <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 25px;">
+                <div style="height: 350px;"><canvas id="chartIdle"></canvas></div>
+                <div style="overflow-y: auto; max-height: 350px;">
                     <table class="table-premium">
-                        <thead><tr><th>Zona Detectada</th><th class="num">Tiempo (HH:mm)</th></tr></thead>
+                        <thead><tr><th>Zona Detectada</th><th class="num">Duración (HH:mm)</th></tr></thead>
                         <tbody id="idleTablaCuerpo"></tbody>
                     </table>
                 </div>
