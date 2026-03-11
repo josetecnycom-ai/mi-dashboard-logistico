@@ -2,16 +2,17 @@ geotab.addin.miDashboard = function (api, state) {
     let chartKmObj = null, chartIdleObj = null, chartUsoObj = null;
     let dataKm = [], dataIdle = [], dataUso = [];
     let masterZones = {};
+    let cacheResults = null; // Caché para recalcular peso al instante
 
     const toggleL = (id, s) => document.getElementById(id).style.display = s ? 'flex' : 'none';
 
+    // Conversor de decimal a formato reloj HH:mm
     const formatTime = (decimalHours) => {
         const totalMinutes = Math.round(decimalHours * 60);
-        const h = Math.floor(totalMinutes / 60);
-        const m = totalMinutes % 60;
-        return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        return `${Math.floor(totalMinutes / 60).toString().padStart(2, '0')}:${(totalMinutes % 60).toString().padStart(2, '0')}`;
     };
 
+    // Parser seguro para tiempos de Geotab
     const getSecs = (ts) => {
         if (!ts) return 0;
         if (typeof ts === 'number') return ts;
@@ -23,101 +24,116 @@ geotab.addin.miDashboard = function (api, state) {
         return 0;
     };
 
-    const procesarTodo = () => {
+    // LÓGICA PRINCIPAL DE PROCESAMIENTO
+    const procesarDatos = (results) => {
+        cacheResults = results;
+        const [devices, weights, trips, zones] = results;
+        
+        // RECOGEMOS EL VALOR DEL INPUT (POR DEFECTO AHORA ES 18000)
+        const UMBRAL = parseFloat(document.getElementById('cfgWeight').value) || 18000;
+        
+        // 1. BLOQUE KILÓMETROS
+        dataKm = devices.map(d => {
+            let vk = 0, ck = 0;
+            let dWeights = weights.filter(w => w.device.id === d.id);
+            trips.filter(tr => tr.device.id === d.id).forEach(tr => {
+                let w = dWeights.filter(dw => new Date(dw.dateTime) <= new Date(tr.stop)).pop();
+                if (w && (w.data / 1000) >= UMBRAL) ck += tr.distance; else vk += tr.distance;
+            });
+            return { name: d.name, vk: Math.round(vk), ck: Math.round(ck), ef: ((ck/(vk+ck+0.1))*100).toFixed(1) + "%" };
+        }).filter(i => (i.vk + i.ck) > 0).sort((a,b) => b.vk - a.vk);
+        renderKM(dataKm);
+
+        // 2. BLOQUE USO DE FLOTA
+        dataUso = devices.map(d => {
+            let vList = trips.filter(tr => tr.device.id === d.id && tr.distance > 0.1);
+            let dias = new Set(vList.map(v => v.start.split('T')[0])).size;
+            let tKm = vList.reduce((acc, v) => acc + v.distance, 0);
+            return { name: d.name, dias: dias, kmDia: dias > 0 ? (tKm/dias).toFixed(1) : 0, total: Math.round(tKm) };
+        }).sort((a,b) => b.total - a.total);
+        renderUso(dataUso);
+
+        // 3. BLOQUE RALENTÍ POR ZONAS
+        masterZones = {}; zones.forEach(z => { masterZones[z.id] = z.name; });
+        let idleTrips = trips.filter(tr => getSecs(tr.idlingDuration) > 0 && tr.stopPoint);
+        
+        if (idleTrips.length === 0) {
+            renderIdle([]); 
+            toggleL('load-idle', false); 
+        } else {
+            let coordsMap = new Map();
+            idleTrips.forEach(tr => {
+                let key = tr.stopPoint.x.toFixed(4) + "," + tr.stopPoint.y.toFixed(4);
+                tr._ckey = key;
+                if (!coordsMap.has(key)) coordsMap.set(key, { x: tr.stopPoint.x, y: tr.stopPoint.y });
+            });
+            
+            let geoCalls = [];
+            let uCoords = Array.from(coordsMap.values());
+            for (let i = 0; i < uCoords.length; i += 400) geoCalls.push(["GetAddresses", { coordinates: uCoords.slice(i, i + 400) }]);
+
+            api.multiCall(geoCalls, (geoResults) => {
+                let resolver = new Map();
+                [].concat(...geoResults).forEach((addr, idx) => {
+                    let zName = (addr && addr.zones && addr.zones.length > 0) ? (masterZones[addr.zones[0].id] || "Zona") : "Fuera de Zona";
+                    resolver.set(Array.from(coordsMap.keys())[idx], zName);
+                });
+                let res = {};
+                idleTrips.forEach(tr => {
+                    let z = resolver.get(tr._ckey) || "Fuera de Zona";
+                    res[z] = (res[z] || 0) + (getSecs(tr.idlingDuration) / 3600);
+                });
+                dataIdle = Object.keys(res).map(k => ({ zona: k, val: res[k], txt: formatTime(res[k]) })).sort((a,b) => b.val - a.val);
+                renderIdle(dataIdle);
+                toggleL('load-idle', false);
+            });
+        }
+        
+        toggleL('load-km', false); 
+        toggleL('load-uso', false);
+    };
+
+    const ejecutarLlamadaMaestra = () => {
         const f = document.getElementById('dateFrom').value + "T00:00:00.000Z";
         const t = document.getElementById('dateTo').value + "T23:59:59.000Z";
-        
         toggleL('load-km', true); toggleL('load-idle', true); toggleL('load-uso', true);
-
+        
         api.multiCall([
             ["Get", { typeName: "Device" }],
             ["Get", { typeName: "StatusData", search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate: f, toDate: t } }],
             ["Get", { typeName: "Trip", search: { fromDate: f, toDate: t } }],
             ["Get", { typeName: "Zone" }]
-        ], (results) => {
-            const [devices, weights, trips, zones] = results;
-            
-            masterZones = {};
-            zones.forEach(z => { masterZones[z.id] = z.name; });
-
-            // 1. KM
-            dataKm = devices.map(d => {
-                let vk = 0, ck = 0;
-                let dWeights = weights.filter(w => w.device.id === d.id);
-                trips.filter(tr => tr.device.id === d.id).forEach(tr => {
-                    let w = dWeights.filter(dw => new Date(dw.dateTime) <= new Date(tr.stop)).pop();
-                    if (w && (w.data / 1000) >= 20000) ck += tr.distance; else vk += tr.distance;
-                });
-                return { name: d.name, vk: Math.round(vk), ck: Math.round(ck), ef: ((ck/(vk+ck+0.1))*100).toFixed(1) + "%" };
-            }).filter(i => (i.vk + i.ck) > 0).sort((a,b) => b.vk - a.vk);
-            renderKM(dataKm);
-            toggleL('load-km', false);
-
-            // 2. USO
-            dataUso = devices.map(d => {
-                let vList = trips.filter(tr => tr.device.id === d.id && tr.distance > 0.1);
-                let diasUnicos = new Set(vList.map(v => v.start.split('T')[0]));
-                let totalKm = vList.reduce((acc, v) => acc + v.distance, 0);
-                let nDias = diasUnicos.size;
-                return { name: d.name, dias: nDias, kmDia: nDias > 0 ? (totalKm / nDias).toFixed(1) : 0, total: Math.round(totalKm) };
-            }).sort((a,b) => b.total - a.total);
-            renderUso(dataUso);
-            toggleL('load-uso', false);
-
-            // 3. RALENTÍ
-            let idleTrips = trips.filter(tr => getSecs(tr.idlingDuration) > 0 && tr.stopPoint);
-            if (idleTrips.length === 0) {
-                renderIdle([]); toggleL('load-idle', false);
-            } else {
-                let coordsMap = new Map();
-                idleTrips.forEach(tr => {
-                    let key = tr.stopPoint.x.toFixed(4) + "," + tr.stopPoint.y.toFixed(4);
-                    tr._ckey = key;
-                    if (!coordsMap.has(key)) coordsMap.set(key, { x: tr.stopPoint.x, y: tr.stopPoint.y });
-                });
-                let geoCalls = [];
-                let uCoords = Array.from(coordsMap.values());
-                for (let i = 0; i < uCoords.length; i += 400) geoCalls.push(["GetAddresses", { coordinates: uCoords.slice(i, i + 400) }]);
-
-                api.multiCall(geoCalls, (geoResults) => {
-                    let allAddrs = [].concat(...geoResults);
-                    let resolver = new Map();
-                    Array.from(coordsMap.keys()).forEach((key, index) => {
-                        let addr = allAddrs[index];
-                        let zName = (addr && addr.zones && addr.zones.length > 0) ? (masterZones[addr.zones[0].id] || "Zona") : "Fuera de Zona";
-                        resolver.set(key, zName);
-                    });
-                    let res = {};
-                    idleTrips.forEach(tr => {
-                        let z = resolver.get(tr._ckey) || "Fuera de Zona";
-                        res[z] = (res[z] || 0) + (getSecs(tr.idlingDuration) / 3600);
-                    });
-                    dataIdle = Object.keys(res).map(k => ({ zona: k, val: res[k], txt: formatTime(res[k]) })).sort((a,b) => b.val - a.val);
-                    renderIdle(dataIdle);
-                    toggleL('load-idle', false);
-                });
-            }
-        });
+        ], procesarDatos);
     };
 
+    // FUNCIONES DE RENDERIZADO VISUAL
     const renderKM = (d) => {
         const ctx = document.getElementById('chart-km').getContext('2d');
         if (chartKmObj) chartKmObj.destroy();
-        chartKmObj = new Chart(ctx, {
-            type: 'bar',
-            data: { labels: d.slice(0,10).map(i => i.name), datasets: [{ label: 'KM Vacío', data: d.slice(0,10).map(i => i.vk), backgroundColor: '#e74c3c' }, { label: 'KM Carga', data: d.slice(0,10).map(i => i.ck), backgroundColor: '#2ecc71' }] },
-            options: { maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } }
+        chartKmObj = new Chart(ctx, { 
+            type: 'bar', 
+            data: { 
+                labels: d.slice(0,10).map(i => i.name), 
+                datasets: [
+                    { label: 'KM Vacío', data: d.slice(0,10).map(i => i.vk), backgroundColor: '#e74c3c' }, 
+                    { label: 'KM Carga', data: d.slice(0,10).map(i => i.ck), backgroundColor: '#2ecc71' }
+                ] 
+            }, 
+            options: { maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } } 
         });
-        document.getElementById('body-km').innerHTML = d.slice(0,15).map(i => `<tr><td>${i.name}</td><td class="num">${i.vk}</td><td class="num">${i.ef}</td></tr>`).join('');
+        document.getElementById('body-km').innerHTML = d.slice(0,15).map(i => `<tr><td><strong>${i.name}</strong></td><td class="num">${i.vk}</td><td class="num">${i.ef}</td></tr>`).join('');
     };
 
     const renderIdle = (d) => {
         const ctx = document.getElementById('chart-idle').getContext('2d');
         if (chartIdleObj) chartIdleObj.destroy();
-        chartIdleObj = new Chart(ctx, {
-            type: 'doughnut',
-            data: { labels: d.slice(0,5).map(i => i.zona), datasets: [{ data: d.slice(0,5).map(i => i.val.toFixed(2)), backgroundColor: ['#3498db', '#2ecc71', '#f1c40f', '#e67e22', '#95a5a6'] }] },
-            options: { maintainAspectRatio: false }
+        chartIdleObj = new Chart(ctx, { 
+            type: 'doughnut', 
+            data: { 
+                labels: d.slice(0,5).map(i => i.zona), 
+                datasets: [{ data: d.slice(0,5).map(i => i.val.toFixed(2)), backgroundColor: ['#3498db', '#2ecc71', '#f1c40f', '#e67e22', '#95a5a6'] }] 
+            }, 
+            options: { maintainAspectRatio: false } 
         });
         document.getElementById('body-idle').innerHTML = d.map(i => `<tr><td><strong>${i.zona}</strong></td><td class="num">${i.txt}</td></tr>`).join('');
     };
@@ -125,59 +141,68 @@ geotab.addin.miDashboard = function (api, state) {
     const renderUso = (d) => {
         const ctx = document.getElementById('chart-uso').getContext('2d');
         if (chartUsoObj) chartUsoObj.destroy();
-        chartUsoObj = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: d.slice(0,12).map(i => i.name),
+        chartUsoObj = new Chart(ctx, { 
+            type: 'bar', 
+            data: { 
+                labels: d.slice(0,12).map(i => i.name), 
                 datasets: [
-                    { label: 'KM Totales', data: d.slice(0,12).map(i => i.total), backgroundColor: 'rgba(52, 152, 219, 0.5)', yAxisID: 'y' },
-                    { label: 'Días Activos', data: d.slice(0,12).map(i => i.dias), type: 'line', borderColor: '#e67e22', tension: 0.3, yAxisID: 'y1' }
-                ]
-            },
-            options: { maintainAspectRatio: false, scales: { y: { type: 'linear', position: 'left' }, y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false } } } }
+                    { label: 'KM Totales', data: d.slice(0,12).map(i => i.total), backgroundColor: 'rgba(52, 152, 219, 0.5)', yAxisID: 'y' }, 
+                    { label: 'Días Activos', data: d.slice(0,12).map(i => i.dias), type: 'line', borderColor: '#e67e22', yAxisID: 'y1' }
+                ] 
+            }, 
+            options: { maintainAspectRatio: false, scales: { y: { position: 'left' }, y1: { position: 'right', grid: { drawOnChartArea: false } } } } 
         });
-        document.getElementById('body-uso').innerHTML = d.map(i => `
-            <tr class="${i.dias === 0 ? 'bad-row' : ''}">
-                <td><strong>${i.name}</strong> ${i.dias === 0 ? '⚠️' : ''}</td>
-                <td class="num">${i.dias}</td>
-                <td class="num">${i.kmDia} km/d</td>
-                <td class="num">${i.total}</td>
-            </tr>
-        `).join('');
+        document.getElementById('body-uso').innerHTML = d.map(i => `<tr class="${i.dias === 0 ? 'bad-row' : ''}"><td><strong>${i.name}</strong> ${i.dias === 0 ? '⚠️' : ''}</td><td class="num">${i.dias}</td><td class="num">${i.kmDia}</td><td class="num">${i.total}</td></tr>`).join('');
     };
 
     return {
         initialize: function (api, state, callback) {
-            // LÓGICA DE FECHAS AUTOMÁTICAS (Últimos 30 días)
+            // INICIALIZACIÓN DE FECHAS A 30 DÍAS
             const hoy = new Date();
-            const hace30d = new Date();
-            hace30d.setDate(hoy.getDate() - 30);
+            const hace30 = new Date(); hace30.setDate(hoy.getDate() - 30);
+            document.getElementById('dateTo').value = hoy.toISOString().split('T')[0];
+            document.getElementById('dateFrom').value = hace30.toISOString().split('T')[0];
 
-            const formatISO = (date) => date.toISOString().split('T')[0];
+            // BOTONES DE ACCIÓN
+            document.getElementById('btnRun').onclick = ejecutarLlamadaMaestra;
+            document.getElementById('btnToggleConfig').onclick = () => {
+                const p = document.getElementById('configPanel');
+                p.style.display = (p.style.display === 'flex') ? 'none' : 'flex';
+            };
 
-            document.getElementById('dateTo').value = formatISO(hoy);
-            document.getElementById('dateFrom').value = formatISO(hace30d);
+            // RECALCULAR AL CAMBIAR EL PESO EN EL INPUT
+            document.getElementById('cfgWeight').onchange = () => { 
+                if (cacheResults) {
+                    toggleL('load-km', true);
+                    // Timeout mínimo para que dé tiempo a mostrar el spinner
+                    setTimeout(() => { procesarDatos(cacheResults); }, 50); 
+                }
+            };
 
-            document.getElementById('btnRun').onclick = procesarTodo;
-            
-            // Exportadores Excel
+            // DESCARGAS DE EXCEL
             document.getElementById('xlsx-km').onclick = () => {
+                if(dataKm.length === 0) return alert("No hay datos para exportar.");
                 const ws = XLSX.utils.json_to_sheet(dataKm);
-                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "KM");
+                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Eficiencia");
                 XLSX.writeFile(wb, "Reporte_Eficiencia.xlsx");
             };
+            
             document.getElementById('xlsx-idle').onclick = () => {
+                if(dataIdle.length === 0) return alert("No hay datos para exportar.");
                 const ws = XLSX.utils.json_to_sheet(dataIdle.map(i => ({ Zona: i.zona, Tiempo: i.txt })));
                 const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Ralenti");
                 XLSX.writeFile(wb, "Reporte_Ralenti_Zonas.xlsx");
             };
+            
             document.getElementById('xlsx-uso').onclick = () => {
+                if(dataUso.length === 0) return alert("No hay datos para exportar.");
                 const ws = XLSX.utils.json_to_sheet(dataUso);
                 const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Uso");
                 XLSX.writeFile(wb, "Reporte_Intensidad_Uso.xlsx");
             };
+            
             callback();
         },
-        focus: function () { procesarTodo(); }
+        focus: function () { ejecutarLlamadaMaestra(); }
     };
 };
