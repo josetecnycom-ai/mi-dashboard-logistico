@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="utf-8">
-    <title>Dashboard Logístico Pro v1.0.21</title>
+    <title>Dashboard Logístico Pro v1.0.23</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
@@ -14,32 +14,46 @@
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .header-title { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #ecf0f1; padding-bottom: 15px; margin-bottom: 20px; }
         .controls { display: flex; gap: 15px; margin-bottom: 25px; align-items: center; background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .btn { padding: 10px 20px; border-radius: 5px; border: none; font-weight: bold; cursor: pointer; transition: 0.3s; display: flex; align-items: center; gap: 8px; }
+        .btn { padding: 10px 20px; border-radius: 5px; border: none; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: 0.2s; }
+        .btn:hover { opacity: 0.9; }
         .btn-primary { background: #3498db; color: white; }
-        .btn-excel { background: #27ae60; color: white; font-size: 13px; }
-        .table-premium { width: 100%; border-collapse: collapse; background: white; }
-        .table-premium th { background: #f8f9fa; padding: 12px; border: 1px solid #dee2e6; text-align: left; font-size: 11px; text-transform: uppercase; color: #7f8c8d; }
+        .btn-config { background: #7f8c8d; color: white; }
+        .btn-excel { background: #27ae60; color: white; font-size: 12px; }
+        
+        /* Panel de Configuración Oculto */
+        #configPanel { display: none; background: #2c3e50; color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; align-items: center; gap: 20px; }
+        #configPanel input { padding: 8px; border-radius: 4px; border: none; width: 120px; font-weight: bold; font-family: monospace; }
+
+        .table-premium { width: 100%; border-collapse: collapse; }
+        .table-premium th { background: #f8f9fa; padding: 12px; border: 1px solid #dee2e6; text-align: left; font-size: 11px; color: #7f8c8d; text-transform: uppercase; }
         .table-premium td { padding: 12px; border: 1px solid #dee2e6; font-size: 13px; }
         .num { text-align: right; font-family: 'Consolas', monospace; font-weight: bold; }
         .bad-row { background-color: #fff5f5; }
-        #v-tag { margin-left: auto; color: #2ecc71; font-weight: 900; background: #eafff2; padding: 6px 18px; border-radius: 50px; border: 1px solid #2ecc71; }
+        #v-tag { margin-left: auto; color: #8e44ad; font-weight: 900; background: #f5eef8; padding: 6px 18px; border-radius: 50px; border: 1px solid #8e44ad; }
     </style>
 </head>
 <body>
     <div class="dashboard-container">
         <div class="controls">
-            <strong>Rango de Fechas:</strong>
+            <strong>Periodo (Últimos 30 días):</strong>
             <input type="date" id="dateFrom">
             <input type="date" id="dateTo">
-            <button class="btn btn-primary" id="btnRun">🔄 ACTUALIZAR DASHBOARD</button>
-            <span id="v-tag">v1.0.21 - AUTO 30D</span>
+            <button class="btn btn-primary" id="btnRun">🔄 ACTUALIZAR TODO</button>
+            <button class="btn btn-config" id="btnToggleConfig">⚙️ AJUSTAR PESO</button>
+            <span id="v-tag">v1.0.23 - FINAL</span>
+        </div>
+
+        <div id="configPanel">
+            <strong>Límite de Carga (kg):</strong>
+            <input type="number" id="cfgWeight" value="18000" step="500">
+            <span><i>El sistema recalculará los KM Vacío/Carga automáticamente al cambiar este valor.</i></span>
         </div>
 
         <div class="card">
-            <div class="loading-overlay" id="load-km"><div class="spinner"></div><p>Analizando Pesos y KM...</p></div>
+            <div class="loading-overlay" id="load-km"><div class="spinner"></div><p>Procesando Pesos...</p></div>
             <div class="header-title">
                 <h2 style="margin:0;">1. Ranking de Kilómetros y Eficiencia</h2>
-                <button class="btn btn-excel" id="xlsx-km">Excel KM</button>
+                <button class="btn btn-excel" id="xlsx-km">📊 Excel KM</button>
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
                 <div style="height: 350px;"><canvas id="chart-km"></canvas></div>
@@ -53,10 +67,10 @@
         </div>
 
         <div class="card">
-            <div class="loading-overlay" id="load-idle"><div class="spinner"></div><p>Cruzando paradas con Zonas Geotab...</p></div>
+            <div class="loading-overlay" id="load-idle"><div class="spinner"></div><p>Mapeando Zonas...</p></div>
             <div class="header-title">
-                <h2 style="margin:0;">2. Ralentí Acumulado por Zona</h2>
-                <button class="btn btn-excel" id="xlsx-idle">Excel Ralentí</button>
+                <h2 style="margin:0;">2. Ralentí Acumulado por Zona Geotab</h2>
+                <button class="btn btn-excel" id="xlsx-idle">📊 Excel Ralentí</button>
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
                 <div style="height: 350px;"><canvas id="chart-idle"></canvas></div>
@@ -70,18 +84,16 @@
         </div>
 
         <div class="card">
-            <div class="loading-overlay" id="load-uso"><div class="spinner"></div><p>Calculando actividad de flota...</p></div>
+            <div class="loading-overlay" id="load-uso"><div class="spinner"></div><p>Calculando Actividad...</p></div>
             <div class="header-title">
                 <h2 style="margin:0;">3. Intensidad de Uso y Disponibilidad</h2>
-                <button class="btn btn-excel" id="xlsx-uso">Excel Uso</button>
+                <button class="btn btn-excel" id="xlsx-uso">📊 Excel Uso</button>
             </div>
             <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 30px;">
                 <div style="height: 350px;"><canvas id="chart-uso"></canvas></div>
                 <div style="overflow-y: auto; max-height: 350px;">
                     <table class="table-premium">
-                        <thead>
-                            <tr><th>Vehículo</th><th class="num">Días Activos</th><th class="num">Ratio KM/Día</th><th class="num">Total KM</th></tr>
-                        </thead>
+                        <thead><tr><th>Vehículo</th><th class="num">Días Activos</th><th class="num">KM/Día</th><th class="num">Total KM</th></tr></thead>
                         <tbody id="body-uso"></tbody>
                     </table>
                 </div>
