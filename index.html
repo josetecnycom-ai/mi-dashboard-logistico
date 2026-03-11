@@ -12,13 +12,17 @@
             margin-bottom: 20px; display: flex; gap: 10px; align-items: center;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .card { 
+            background: white; padding: 20px; border-radius: 8px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
+        }
+        /* ESTO ES LO QUE HACE QUE NO SE AMONTONE */
         .chart-container { 
-    position: relative; 
-    height: 75vh; /* Aumentamos al 75% de la altura de la pantalla */
-    min-height: 600px; /* Aseguramos un mínimo de 600px para que las 10 barras respiren */
-    width: 100%; 
-}
+            position: relative; 
+            height: 65vh; 
+            min-height: 600px; /* Garantiza 600px de altura mínima */
+            width: 100%; 
+        }
         button { 
             padding: 10px 15px; cursor: pointer; border: none; border-radius: 4px;
             background: #004682; color: white; font-weight: bold;
@@ -34,11 +38,10 @@
         <label>Desde:</label> <input type="date" id="dateFrom">
         <label>Hasta:</label> <input type="date" id="dateTo">
         <button id="updateBtn">Actualizar Datos</button>
-        <button id="exportBtn">Descargar Excel</button>
+        <button id="exportBtn">Descargar Excel (Toda la flota)</button>
     </div>
 
     <div class="card">
-        <h2>Ranking de Eficiencia: Viajes con Carga vs Vacío</h2>
         <div class="chart-container">
             <canvas id="graficoRanking"></canvas>
         </div>
