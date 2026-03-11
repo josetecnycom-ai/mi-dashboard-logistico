@@ -1,42 +1,32 @@
-/**
- * Dashboard Logístico Pro - Geotab Add-in
- * Nombre registrado: miDashboard
- */
 geotab.addin.miDashboard = function (api, state) {
     let chartInstancia = null;
     let todosLosDatosParaExcel = [];
 
-    // --- 1. PROCESAMIENTO DE KILÓMETROS (CON TRIPS) ---
+    // --- 1. PROCESAMIENTO DE KILÓMETROS ---
     const procesarKilometros = (dispositivos, registrosPeso, viajes) => {
         const UMBRAL_CARGA_KG = 20000;
         let statsPorCamion = {};
 
-        // Inicializamos los contadores de la flota
         dispositivos.forEach(d => {
             statsPorCamion[d.id] = { nombre: d.name, kmConCarga: 0, kmEnVacio: 0 };
         });
 
-        // Agrupamos los registros de peso por camión para buscar más rápido
         let pesosPorCamion = {};
         registrosPeso.forEach(reg => {
             if (!pesosPorCamion[reg.device.id]) pesosPorCamion[reg.device.id] = [];
             pesosPorCamion[reg.device.id].push(reg);
         });
 
-        // Analizamos cada VIAJE
         viajes.forEach(viaje => {
             if (!statsPorCamion[viaje.device.id]) return;
 
             const pesosDelCamion = pesosPorCamion[viaje.device.id] || [];
-            
-            // Buscamos el último registro de peso que ocurrió ANTES o DURANTE este viaje
             const pesoAsociado = pesosDelCamion
                 .filter(p => new Date(p.dateTime) <= new Date(viaje.stop))
-                .pop(); // Toma el último válido
+                .pop(); 
 
             const pesoKg = pesoAsociado ? (pesoAsociado.data / 1000) : 0;
 
-            // En Geotab, viaje.distance suele venir en Kilómetros
             if (pesoKg >= UMBRAL_CARGA_KG) {
                 statsPorCamion[viaje.device.id].kmConCarga += viaje.distance;
             } else {
@@ -44,15 +34,16 @@ geotab.addin.miDashboard = function (api, state) {
             }
         });
 
-        // Filtramos y ordenamos para el Excel y el Gráfico
+        // Filtrar y ordenar de MAYOR a MENOR por KM EN VACÍO
         let flotaCompleta = Object.values(statsPorCamion).filter(v => (v.kmConCarga + v.kmEnVacio) > 0);
         todosLosDatosParaExcel = flotaCompleta.sort((a, b) => b.kmEnVacio - a.kmEnVacio);
 
-        // Pasamos solo los 10 con más KM en vacío al gráfico
-        dibujarGrafico(todosLosDatosParaExcel.slice(0, 10));
+        // EXTRAER EXACTAMENTE EL TOP 10
+        let top10 = todosLosDatosParaExcel.slice(0, 10);
+        dibujarGrafico(top10);
     };
 
-    // --- 2. GENERACIÓN DEL GRÁFICO ---
+    // --- 2. GRÁFICO (MÁS AMPLIO Y LEGIBLE) ---
     const dibujarGrafico = (datosTop10) => {
         const ctx = document.getElementById('graficoRanking').getContext('2d');
         if (chartInstancia) chartInstancia.destroy();
@@ -63,39 +54,54 @@ geotab.addin.miDashboard = function (api, state) {
                 labels: datosTop10.map(d => d.nombre),
                 datasets: [
                     {
-                        label: 'KM en VACÍO (< 20t)',
+                        label: 'KM EN VACÍO (< 20t)',
                         data: datosTop10.map(d => Math.round(d.kmEnVacio)),
-                        backgroundColor: '#e74c3c',
-                        barThickness: 30
+                        backgroundColor: '#e74c3c', // Rojo
+                        barThickness: 35 // Barras más gruesas
                     },
                     {
-                        label: 'KM con CARGA (> 20t)',
+                        label: 'KM CON CARGA (> 20t)',
                         data: datosTop10.map(d => Math.round(d.kmConCarga)),
-                        backgroundColor: '#2ecc71',
-                        barThickness: 30
+                        backgroundColor: '#2ecc71', // Verde
+                        barThickness: 35
                     }
                 ]
             },
             options: {
-                indexAxis: 'y',
+                indexAxis: 'y', // Barras horizontales
                 responsive: true,
-                maintainAspectRatio: false,
+                maintainAspectRatio: false, // CLAVE: Permite que llene los 600px del HTML
+                layout: {
+                    padding: { left: 10, right: 30, top: 10, bottom: 10 }
+                },
                 scales: {
-                    x: { stacked: true, title: { display: true, text: 'Kilómetros (km)' } },
+                    x: { 
+                        stacked: true, 
+                        title: { display: true, text: 'Kilómetros (km)', font: { size: 14, weight: 'bold' } } 
+                    },
                     y: { 
                         stacked: true, 
-                        ticks: { autoSkip: false, font: { size: 14, weight: 'bold' } } 
+                        ticks: { 
+                            autoSkip: false, // CLAVE: Obliga a mostrar las 10 matrículas, no oculta ninguna
+                            font: { size: 15, weight: 'bold' },
+                            color: '#333'
+                        } 
                     }
                 },
                 plugins: {
-                    legend: { position: 'top' },
-                    title: { display: true, text: 'TOP 10 VEHÍCULOS: KILÓMETROS EN VACÍO VS CARGA', font: { size: 18 } }
+                    legend: { position: 'top', labels: { font: { size: 14 } } },
+                    title: { 
+                        display: true, 
+                        text: 'RANKING: TOP 10 VEHÍCULOS CON MÁS KILÓMETROS EN VACÍO', 
+                        font: { size: 20 },
+                        padding: { bottom: 20 }
+                    }
                 }
             }
         });
     };
 
-    // --- 3. EXPORTACIÓN A EXCEL ---
+    // --- 3. EXCEL ---
     const descargarExcel = () => {
         if (todosLosDatosParaExcel.length === 0) return alert("No hay datos para exportar.");
         
@@ -118,25 +124,18 @@ geotab.addin.miDashboard = function (api, state) {
         const fromDate = document.getElementById('dateFrom').value + "T00:00:00.000Z";
         const toDate = document.getElementById('dateTo').value + "T23:59:59.000Z";
 
-        console.log("Cargando Viajes y Pesos...");
-
-        // Pedimos Vehículos, Pesos y VIAJES (Trip)
         api.multiCall([
             ["Get", { typeName: "Device" }],
             ["Get", { 
                 typeName: "StatusData", 
                 search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate: fromDate, toDate: toDate }
             }],
-            ["Get", { 
-                typeName: "Trip", // <--- ESTA ES LA CLAVE, usamos "Trip"
-                search: { fromDate: fromDate, toDate: toDate }
-            }]
+            ["Get", { typeName: "Trip", search: { fromDate: fromDate, toDate: toDate } }]
         ], (results) => {
-            console.log("Datos recibidos correctamente.");
             procesarKilometros(results[0], results[1], results[2]);
         }, (err) => {
             console.error("Error al cargar datos:", err);
-            alert("Error al cargar datos. Revisa la consola.");
+            alert("Error al obtener datos. Revisa la consola.");
         });
     };
 
