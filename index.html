@@ -2,68 +2,43 @@
 <html lang="es">
 <head>
     <meta charset="utf-8">
-    <title>Dashboard Logístico Pro v1.0.12</title>
+    <title>Dashboard Logístico Pro v1.0.13</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f4f7f9; padding: 20px; color: #253746; margin: 0; }
         .dashboard-container { max-width: 1350px; margin: 0 auto; }
-        
-        .card { 
-            background: white; padding: 25px; border-radius: 8px; 
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 25px;
-            position: relative; min-height: 200px;
-        }
-
-        /* Overlay de Carga */
-        .loading-overlay {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(255,255,255,0.8); display: none;
-            flex-direction: column; align-items: center; justify-content: center;
-            z-index: 10; border-radius: 8px;
-        }
-        .spinner {
-            width: 40px; height: 40px; border: 4px solid #f3f3f3;
-            border-top: 4px solid #2780e3; border-radius: 50%;
-            animation: spin 1s linear infinite; margin-bottom: 10px;
-        }
+        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 25px; position: relative; }
+        .loading-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 10; border-radius: 8px; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #2780e3; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        .header-title { display: flex; align-items: center; border-bottom: 2px solid #e0e6eb; padding-bottom: 15px; margin-bottom: 20px; }
-        .header-title h2 { margin: 0; font-size: 18px; }
-
+        .header-title { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #e0e6eb; padding-bottom: 15px; margin-bottom: 20px; }
         .controls { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; }
-        input[type="date"] { padding: 8px; border-radius: 4px; border: 1px solid #caced1; }
-        
-        .btn { padding: 8px 16px; border-radius: 4px; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .btn { padding: 8px 16px; border-radius: 4px; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; }
         .btn-primary { background: #2780e3; color: white; }
-        .btn-success { background: #008767; color: white; }
-        .btn:disabled { background: #cbd5e0; cursor: not-allowed; }
-
+        .btn-excel { background: #008767; color: white; margin-left: auto; }
         .table-premium { width: 100%; border-collapse: collapse; border: 1px solid #caced1; }
-        .table-premium th { background: #f0f3f6; font-size: 11px; padding: 12px; border: 1px solid #caced1; text-align: left; }
-        .table-premium td { padding: 10px 12px; border: 1px solid #caced1; font-size: 13px; }
+        .table-premium th { background: #f0f3f6; font-size: 11px; padding: 10px; border: 1px solid #caced1; text-align: left; }
+        .table-premium td { padding: 8px 10px; border: 1px solid #caced1; font-size: 13px; }
         .num { text-align: right !important; font-family: 'Consolas', monospace; }
-
         .chart-container { position: relative; height: 350px; width: 100%; }
-        #global-status { font-weight: bold; color: #2780e3; margin-bottom: 10px; display: block; }
-        #version-tag { position: fixed; bottom: 10px; right: 10px; font-size: 10px; color: #aaa; }
     </style>
 </head>
 <body>
-
     <div class="dashboard-container">
-        <span id="global-status">Iniciando sistema...</span>
+        <div class="controls" style="background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
+            <strong>Periodo Global:</strong>
+            <input type="date" id="dateFrom">
+            <input type="date" id="dateTo">
+            <button class="btn btn-primary" id="btnUpdateMain">🔄 Actualizar Dashboard</button>
+            <span id="global-status" style="margin-left: 20px; font-size: 14px; color: #2780e3;"></span>
+        </div>
 
-        <div class="card" id="card-km">
-            <div class="loading-overlay" id="loader-km">
-                <div class="spinner"></div>
-                <span>Procesando kilómetros y eficiencia...</span>
-            </div>
-            <div class="header-title"><h2>1. Ranking de Kilómetros y Eficiencia</h2></div>
-            <div class="controls">
-                <input type="date" id="dateFrom"> <input type="date" id="dateTo">
-                <button class="btn btn-primary" id="btnUpdateMain">Actualizar Todo</button>
+        <div class="card">
+            <div class="loading-overlay" id="loader-km"><div class="spinner"></div></div>
+            <div class="header-title">
+                <h2>1. Ranking de Kilómetros y Eficiencia</h2>
+                <button class="btn btn-excel" id="btnExcelKm">📊 Excel KM</button>
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                 <div class="chart-container"><canvas id="chartVacio"></canvas></div>
@@ -76,22 +51,22 @@
             </div>
         </div>
 
-        <div class="card" id="card-idle">
-            <div class="loading-overlay" id="loader-idle">
-                <div class="spinner"></div>
-                <span>Analizando paradas y zonas de ralentí...</span>
+        <div class="card">
+            <div class="loading-overlay" id="loader-idle"><div class="spinner"></div></div>
+            <div class="header-title">
+                <h2>2. Impacto de Ralentí por Ubicación</h2>
+                <button class="btn btn-excel" id="btnExcelIdle">⛽ Excel Ralentí</button>
             </div>
-            <div class="header-title"><h2>2. Análisis de Ralentí por Ubicación</h2></div>
-            <div class="chart-container" style="height: 300px;"><canvas id="chartIdle"></canvas></div>
-            <table class="table-premium" style="margin-top: 15px;">
-                <thead><tr><th>Zona / Ubicación</th><th class="num">Ralentí (h)</th><th class="num">Costo Est. (€)</th></tr></thead>
-                <tbody id="idleTablaCuerpo"></tbody>
-            </table>
+            <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 25px;">
+                <div class="chart-container"><canvas id="chartIdle"></canvas></div>
+                <table class="table-premium">
+                    <thead><tr><th>Zona / Ubicación</th><th class="num">Ralentí (h)</th><th class="num">Costo (€)</th></tr></thead>
+                    <tbody id="idleTablaCuerpo"></tbody>
+                </table>
+            </div>
         </div>
-
     </div>
-
-    <span id="version-tag">v1.0.12</span>
+    <span id="version-tag" style="position:fixed; bottom:5px; right:5px; font-size:10px; color:#ccc;">v1.0.13</span>
     <script src="app.js"></script>
 </body>
 </html>
