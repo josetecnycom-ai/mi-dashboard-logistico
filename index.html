@@ -2,109 +2,78 @@
 <html lang="es">
 <head>
     <meta charset="utf-8">
-    <title>Dashboard Logístico Pro v1.0.10</title>
+    <title>Dashboard Logístico Pro v1.0.11</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f4f7f9; padding: 20px; color: #253746; margin: 0; }
         .dashboard-container { max-width: 1350px; margin: 0 auto; }
-        
-        .card { 
-            background: white; padding: 25px; border-radius: 8px; 
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 25px;
-        }
-
-        .header-title { 
-            display: flex; align-items: center; border-bottom: 2px solid #e0e6eb; 
-            padding-bottom: 15px; margin-bottom: 20px; 
-        }
+        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        .header-title { display: flex; align-items: center; border-bottom: 2px solid #e0e6eb; padding-bottom: 15px; margin-bottom: 20px; }
         .header-title h2 { margin: 0; font-size: 20px; color: #253746; }
-
         .controls { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
-        .controls span { font-size: 14px; font-weight: 600; }
-        
-        input[type="date"] { padding: 8px; border-radius: 4px; border: 1px solid #caced1; font-size: 13px; outline: none; }
-
-        .btn { padding: 8px 16px; border-radius: 4px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; transition: 0.2s; }
+        input[type="date"] { padding: 8px; border-radius: 4px; border: 1px solid #caced1; font-size: 13px; }
+        .btn { padding: 8px 16px; border-radius: 4px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s; }
         .btn-primary { background: #2780e3; color: white; }
         .btn-success { background: #008767; color: white; }
-        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
-        .btn:disabled { background: #cbd5e0; cursor: not-allowed; }
-
-        .table-premium { width: 100%; border-collapse: collapse; border: 1px solid #caced1; margin-top: 10px; }
-        .table-premium th { 
-            background: #f0f3f6; color: #5a6872; text-transform: uppercase; 
-            font-size: 11px; font-weight: bold; padding: 12px; border: 1px solid #caced1; text-align: left;
-        }
+        .btn-warning { background: #e67e22; color: white; }
+        .table-premium { width: 100%; border-collapse: collapse; border: 1px solid #caced1; }
+        .table-premium th { background: #f0f3f6; font-size: 11px; padding: 12px; border: 1px solid #caced1; text-align: left; }
         .table-premium td { padding: 10px 12px; border: 1px solid #caced1; font-size: 13px; }
-        .table-premium tr:nth-child(even) { background-color: #fcfcfc; }
-        .table-premium tr:hover { background-color: #f0f7ff; }
-        
         .num { text-align: right !important; font-family: 'Consolas', monospace; }
-        .total-col { font-weight: bold; color: #004683; background: #fafbfc; }
-
-        .ef-container { display: flex; align-items: center; gap: 10px; width: 150px; }
+        .ef-container { display: flex; align-items: center; gap: 10px; width: 140px; }
         .ef-bar-bg { background: #eef3f8; border-radius: 10px; height: 6px; flex-grow: 1; overflow: hidden; }
-        .ef-bar-fill { height: 100%; border-radius: 10px; transition: width 0.5s; }
-
-        .chart-container { position: relative; height: 400px; width: 100%; }
+        .ef-bar-fill { height: 100%; border-radius: 10px; }
+        .chart-container { position: relative; height: 350px; width: 100%; }
         #version-tag { position: fixed; bottom: 10px; right: 10px; font-size: 10px; color: #aaa; }
-        #status-msg { font-size: 12px; color: #2780e3; font-weight: bold; }
     </style>
 </head>
 <body>
-
     <div class="dashboard-container">
-        
         <div class="card">
-            <div class="header-title">
-                <svg width="24" height="24" style="margin-right: 12px; fill: #2780e3;" viewBox="0 0 24 24"><path d="M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z" /></svg>
-                <h2>Ranking: 10 Vehículos con más KM en Vacío</h2>
-            </div>
+            <div class="header-title"><h2>Ranking: KM en Vacío</h2></div>
             <div class="controls">
-                <span>Periodo:</span>
-                <input type="date" id="vacioFrom">
-                <input type="date" id="vacioTo">
-                <button class="btn btn-primary" id="vacioUpdate">Actualizar Gráfico</button>
-                <button class="btn btn-success" id="vacioExcel">Excel Gráfico</button>
-                <span id="status-msg"></span>
+                <input type="date" id="vacioFrom"> <input type="date" id="vacioTo">
+                <button class="btn btn-primary" id="vacioUpdate">Actualizar</button>
             </div>
-            <div class="chart-container">
-                <canvas id="chartVacio"></canvas>
-            </div>
+            <div class="chart-container"><canvas id="chartVacio"></canvas></div>
         </div>
 
         <div class="card">
-            <div class="header-title">
-                <svg width="24" height="24" style="margin-right: 12px; fill: #008767;" viewBox="0 0 24 24"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M12,19L8,15H10.5V12H13.5V15H16L12,19Z" /></svg>
-                <h2>Eficiencia Detallada de la Flota</h2>
-            </div>
+            <div class="header-title"><h2>Eficiencia Detallada</h2></div>
             <div class="controls">
-                <span>Periodo:</span>
-                <input type="date" id="tablaFrom">
-                <input type="date" id="tablaTo">
-                <button class="btn btn-primary" id="tablaUpdate">Actualizar Tabla</button>
-                <button class="btn btn-success" id="tablaExcel">Excel Tabla Completa</button>
+                <input type="date" id="tablaFrom"> <input type="date" id="tablaTo">
+                <button class="btn btn-primary" id="tablaUpdate">Filtrar</button>
             </div>
             <table class="table-premium">
-                <thead>
-                    <tr>
-                        <th>Vehículo</th>
-                        <th class="num">KM Vacío (<20t)</th>
-                        <th class="num">KM Carga (>20t)</th>
-                        <th class="num">Distancia Total</th>
-                        <th>Eficiencia (KM Carga/Total)</th>
-                    </tr>
-                </thead>
-                <tbody id="tablaCuerpo">
-                    <tr><td colspan="5" style="text-align:center; padding:20px;">Presione "Actualizar Tabla" para cargar datos...</td></tr>
-                </tbody>
+                <thead><tr><th>Vehículo</th><th class="num">KM Vacío</th><th class="num">KM Carga</th><th class="num">Total</th><th>Eficiencia</th></tr></thead>
+                <tbody id="tablaCuerpo"></tbody>
             </table>
         </div>
 
+        <div class="card">
+            <div class="header-title">
+                <svg width="24" height="24" style="margin-right:12px; fill:#e67e22;" viewBox="0 0 24 24"><path d="M12,2L4.5,20.29L5.21,21L12,18L18.79,21L19.5,20.29L12,2Z"/></svg>
+                <h2>Impacto de Ralentí por Zona Operativa</h2>
+            </div>
+            <div class="controls">
+                <span>Periodo Ralentí:</span>
+                <input type="date" id="idleFrom">
+                <input type="date" id="idleTo">
+                <button class="btn btn-warning" id="idleUpdate">Analizar Ralentí</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 25px;">
+                <div class="chart-container"><canvas id="chartIdle"></canvas></div>
+                <div>
+                    <table class="table-premium">
+                        <thead><tr><th>Zona / Ubicación</th><th class="num">Ralentí (h)</th><th class="num">Costo Est. (€)</th></tr></thead>
+                        <tbody id="idleTablaCuerpo"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </div>
-
-    <span id="version-tag">v1.0.10</span>
+    <span id="version-tag">v1.0.11</span>
     <script src="app.js"></script>
 </body>
 </html>
