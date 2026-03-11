@@ -1,73 +1,78 @@
+/**
+ * Dashboard Logístico Pro - Geotab Add-in
+ * Nombre registrado: miDashboard
+ */
 geotab.addin.miDashboard = function (api, state) {
     let chartInstancia = null;
     let todosLosDatosParaExcel = [];
 
-    // --- 1. PROCESAMIENTO DE KILÓMETROS ---
-    const procesarKilometros = (dispositivos, registrosPeso, logsGps) => {
+    // --- 1. PROCESAMIENTO DE KILÓMETROS (CON TRIPS) ---
+    const procesarKilometros = (dispositivos, registrosPeso, viajes) => {
         const UMBRAL_CARGA_KG = 20000;
         let statsPorCamion = {};
 
+        // Inicializamos los contadores de la flota
         dispositivos.forEach(d => {
             statsPorCamion[d.id] = { nombre: d.name, kmConCarga: 0, kmEnVacio: 0 };
         });
 
-        // Ordenar pesos por fecha para facilitar la búsqueda
-        const pesosOrdenados = registrosPeso.sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+        // Agrupamos los registros de peso por camión para buscar más rápido
+        let pesosPorCamion = {};
+        registrosPeso.forEach(reg => {
+            if (!pesosPorCamion[reg.device.id]) pesosPorCamion[reg.device.id] = [];
+            pesosPorCamion[reg.device.id].push(reg);
+        });
 
-        // Agrupar logs de GPS por dispositivo
-        dispositivos.forEach(dev => {
-            const logsVehiculo = logsGps.filter(l => l.device.id === dev.id)
-                                        .sort((a, b) => new Date(a.dateTime) - new Date(b.dateTime));
+        // Analizamos cada VIAJE
+        viajes.forEach(viaje => {
+            if (!statsPorCamion[viaje.device.id]) return;
 
-            for (let i = 0; i < logsVehiculo.length - 1; i++) {
-                const logActual = logsVehiculo[i];
-                const logSiguiente = logsVehiculo[i+1];
-                
-                // Distancia entre estos dos puntos (Geotab devuelve km en los logs de viaje)
-                // Si no viene directo, se calcula por la diferencia de metros si el log lo trae
-                const distancia = (logSiguiente.distance - logActual.distance); 
+            const pesosDelCamion = pesosPorCamion[viaje.device.id] || [];
+            
+            // Buscamos el último registro de peso que ocurrió ANTES o DURANTE este viaje
+            const pesoAsociado = pesosDelCamion
+                .filter(p => new Date(p.dateTime) <= new Date(viaje.stop))
+                .pop(); // Toma el último válido
 
-                if (distancia > 0) {
-                    // Buscar el último peso conocido antes de este movimiento
-                    const pesoCercano = pesosOrdenados.filter(p => p.device.id === dev.id && new Date(p.dateTime) <= new Date(logActual.dateTime)).pop();
-                    const pesoKg = pesoCercano ? (pesoCercano.data / 1000) : 0;
+            const pesoKg = pesoAsociado ? (pesoAsociado.data / 1000) : 0;
 
-                    if (pesoKg >= UMBRAL_CARGA_KG) {
-                        statsPorCamion[dev.id].kmConCarga += distancia;
-                    } else {
-                        statsPorCamion[dev.id].kmEnVacio += distancia;
-                    }
-                }
+            // En Geotab, viaje.distance suele venir en Kilómetros
+            if (pesoKg >= UMBRAL_CARGA_KG) {
+                statsPorCamion[viaje.device.id].kmConCarga += viaje.distance;
+            } else {
+                statsPorCamion[viaje.device.id].kmEnVacio += viaje.distance;
             }
         });
 
+        // Filtramos y ordenamos para el Excel y el Gráfico
         let flotaCompleta = Object.values(statsPorCamion).filter(v => (v.kmConCarga + v.kmEnVacio) > 0);
         todosLosDatosParaExcel = flotaCompleta.sort((a, b) => b.kmEnVacio - a.kmEnVacio);
 
+        // Pasamos solo los 10 con más KM en vacío al gráfico
         dibujarGrafico(todosLosDatosParaExcel.slice(0, 10));
     };
 
-    // --- 2. GRÁFICO DE BARRAS (KILÓMETROS) ---
-    const dibujarGrafico = (datos) => {
+    // --- 2. GENERACIÓN DEL GRÁFICO ---
+    const dibujarGrafico = (datosTop10) => {
         const ctx = document.getElementById('graficoRanking').getContext('2d');
         if (chartInstancia) chartInstancia.destroy();
 
         chartInstancia = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: datos.map(d => d.nombre),
+                labels: datosTop10.map(d => d.nombre),
                 datasets: [
                     {
-                        label: 'KM en VACÍO',
-                        data: datos.map(d => d.kmEnVacio.toFixed(2)),
+                        label: 'KM en VACÍO (< 20t)',
+                        data: datosTop10.map(d => Math.round(d.kmEnVacio)),
                         backgroundColor: '#e74c3c',
-                        barThickness: 25
+                        barThickness: 30
                     },
                     {
-                        label: 'KM con CARGA',
-                        data: datos.map(d => d.kmConCarga.toFixed(2)),
+                        label: 'KM con CARGA (> 20t)',
+                        data: datosTop10.map(d => Math.round(d.kmConCarga)),
                         backgroundColor: '#2ecc71',
-                        barThickness: 25
+                        barThickness: 30
                     }
                 ]
             },
@@ -76,60 +81,78 @@ geotab.addin.miDashboard = function (api, state) {
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: { stacked: true, title: { display: true, text: 'Kilómetros Recorridos (km)' } },
-                    y: { stacked: true, ticks: { font: { weight: 'bold' } } }
+                    x: { stacked: true, title: { display: true, text: 'Kilómetros (km)' } },
+                    y: { 
+                        stacked: true, 
+                        ticks: { autoSkip: false, font: { size: 14, weight: 'bold' } } 
+                    }
                 },
                 plugins: {
-                    title: { display: true, text: 'TOP 10: KM RECORRIDOS EN VACÍO VS CARGA', font: { size: 18 } }
+                    legend: { position: 'top' },
+                    title: { display: true, text: 'TOP 10 VEHÍCULOS: KILÓMETROS EN VACÍO VS CARGA', font: { size: 18 } }
                 }
             }
         });
     };
 
-    // --- 3. EXCEL ---
+    // --- 3. EXPORTACIÓN A EXCEL ---
     const descargarExcel = () => {
+        if (todosLosDatosParaExcel.length === 0) return alert("No hay datos para exportar.");
+        
         const dataExcel = todosLosDatosParaExcel.map(d => ({
             "Vehículo": d.nombre,
-            "KM Vacío": d.kmEnVacio.toFixed(2),
-            "KM Carga": d.kmConCarga.toFixed(2),
-            "Total KM": (d.kmEnVacio + d.kmConCarga).toFixed(2),
-            "% Eficiencia KM": ((d.kmConCarga / (d.kmEnVacio + d.kmConCarga)) * 100).toFixed(2) + "%"
+            "KM en Vacío": Math.round(d.kmEnVacio),
+            "KM con Carga": Math.round(d.kmConCarga),
+            "Total KM": Math.round(d.kmEnVacio + d.kmConCarga),
+            "% Distancia Rentable": ((d.kmConCarga / (d.kmEnVacio + d.kmConCarga)) * 100).toFixed(2) + "%"
         }));
+
         const ws = XLSX.utils.json_to_sheet(dataExcel);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Kilometraje");
-        XLSX.writeFile(wb, "Reporte_KM_Carga.xlsx");
+        XLSX.utils.book_append_sheet(wb, ws, "Kilometraje por Carga");
+        XLSX.writeFile(wb, "Reporte_KM_Flota.xlsx");
     };
 
-    // --- 4. CARGA DE DATOS (MULTICALL) ---
+    // --- 4. CARGA DE DATOS ---
     const cargarDatos = () => {
         const fromDate = document.getElementById('dateFrom').value + "T00:00:00.000Z";
         const toDate = document.getElementById('dateTo').value + "T23:59:59.000Z";
 
+        console.log("Cargando Viajes y Pesos...");
+
+        // Pedimos Vehículos, Pesos y VIAJES (Trip)
         api.multiCall([
             ["Get", { typeName: "Device" }],
             ["Get", { 
                 typeName: "StatusData", 
-                search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate, toDate }
+                search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate: fromDate, toDate: toDate }
             }],
             ["Get", { 
-                typeName: "LogRecord", 
-                search: { fromDate, toDate }
+                typeName: "Trip", // <--- ESTA ES LA CLAVE, usamos "Trip"
+                search: { fromDate: fromDate, toDate: toDate }
             }]
         ], (results) => {
+            console.log("Datos recibidos correctamente.");
             procesarKilometros(results[0], results[1], results[2]);
-        }, (err) => console.error(err));
+        }, (err) => {
+            console.error("Error al cargar datos:", err);
+            alert("Error al cargar datos. Revisa la consola.");
+        });
     };
 
+    // --- 5. INICIALIZACIÓN ---
     return {
         initialize: function (api, state, callback) {
             const hoy = new Date();
             const hace30 = new Date();
             hace30.setDate(hoy.getDate() - 30);
+            
             document.getElementById('dateTo').value = hoy.toISOString().split('T')[0];
             document.getElementById('dateFrom').value = hace30.toISOString().split('T')[0];
+            
             document.getElementById('updateBtn').onclick = cargarDatos;
             document.getElementById('exportBtn').onclick = descargarExcel;
+            
             if (callback) callback();
         },
         focus: function () { cargarDatos(); },
