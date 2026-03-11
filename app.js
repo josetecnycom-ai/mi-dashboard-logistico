@@ -4,52 +4,40 @@
  */
 geotab.addin.miDashboard = function (api, state) {
     let chartInstancia = null;
-    let todosLosDatosParaExcel = []; // Guardamos la flota completa aquí
+    let todosLosDatosParaExcel = [];
 
     // --- 1. PROCESAMIENTO DE DATOS ---
     const procesarDatos = (dispositivos, registrosPeso) => {
         const UMBRAL_CARGA_KG = 20000;
         let statsPorCamion = {};
 
-        // Inicializamos todos los camiones de la flota
         dispositivos.forEach(d => {
             statsPorCamion[d.id] = { 
-                nombre: d.name, 
+                nombre: d.name, // Aquí Geotab suele traer la matrícula o nombre del vehículo
                 conCarga: 0, 
                 enVacio: 0,
                 totalRegistros: 0
             };
         });
 
-        // Clasificamos las mediciones de peso
         registrosPeso.forEach(reg => {
             if (statsPorCamion[reg.device.id]) {
-                // Convertimos de Gramos a Kilogramos
                 const pesoKg = reg.data / 1000;
-                
-                if (pesoKg >= UMBRAL_CARGA_KG) {
-                    statsPorCamion[reg.device.id].conCarga++;
-                } else {
-                    statsPorCamion[reg.device.id].enVacio++;
-                }
+                if (pesoKg >= UMBRAL_CARGA_KG) statsPorCamion[reg.device.id].conCarga++;
+                else statsPorCamion[reg.device.id].enVacio++;
                 statsPorCamion[reg.device.id].totalRegistros++;
             }
         });
 
-        // Convertimos a Array y filtramos solo los que tienen actividad
-        let flotaCompleta = Object.values(statsPorCamion)
-            .filter(v => v.totalRegistros > 0);
-
-        // Guardamos para el Excel (toda la flota con actividad)
+        let flotaCompleta = Object.values(statsPorCamion).filter(v => v.totalRegistros > 0);
         todosLosDatosParaExcel = flotaCompleta.sort((a, b) => b.enVacio - a.enVacio);
 
-        // Creamos el Top 10 para el Gráfico (los que más viajes en vacío tienen)
+        // Tomamos el Top 10 para la visualización clara
         let top10Inactivos = [...todosLosDatosParaExcel].slice(0, 10);
-
         dibujarGrafico(top10Inactivos);
     };
 
-    // --- 2. GENERACIÓN DEL GRÁFICO (TOP 10) ---
+    // --- 2. GENERACIÓN DEL GRÁFICO (MÁS GRANDE Y CLARO) ---
     const dibujarGrafico = (datosTop10) => {
         const ctx = document.getElementById('graficoRanking').getContext('2d');
         if (chartInstancia) chartInstancia.destroy();
@@ -60,60 +48,71 @@ geotab.addin.miDashboard = function (api, state) {
                 labels: datosTop10.map(d => d.nombre),
                 datasets: [
                     {
-                        label: 'Registros en VACÍO (< 20t)',
+                        label: 'Viajes en VACÍO (< 20t)',
                         data: datosTop10.map(d => d.enVacio),
-                        backgroundColor: '#e74c3c' // Rojo
+                        backgroundColor: '#e74c3c',
+                        barThickness: 30 // Grosor fijo de la barra para que se vea contundente
                     },
                     {
-                        label: 'Registros con CARGA (> 20t)',
+                        label: 'Viajes con CARGA (> 20t)',
                         data: datosTop10.map(d => d.conCarga),
-                        backgroundColor: '#2ecc71' // Verde
+                        backgroundColor: '#2ecc71',
+                        barThickness: 30
                     }
                 ]
             },
             options: {
-                indexAxis: 'y', // Barras horizontales para mejor lectura de nombres
+                indexAxis: 'y',
                 responsive: true,
-                maintainAspectRatio: false,
+                maintainAspectRatio: false, // Permite que use toda la altura del contenedor CSS
                 scales: {
-                    x: { stacked: true, title: { display: true, text: 'Cantidad de Registros' } },
-                    y: { stacked: true }
+                    x: { 
+                        stacked: true, 
+                        grid: { display: false },
+                        title: { display: true, text: 'Cantidad de Mediciones detectadas' }
+                    },
+                    y: { 
+                        stacked: true,
+                        ticks: {
+                            autoSkip: false, // Obliga a mostrar todas las matrículas
+                            font: {
+                                size: 14, // Fuente más grande para las matrículas
+                                weight: 'bold'
+                            }
+                        }
+                    }
                 },
                 plugins: {
                     legend: { position: 'top' },
-                    title: { display: true, text: 'Top 10 Camiones con más Viajes en Vacío' }
+                    title: { 
+                        display: true, 
+                        text: 'RANKING: 10 VEHÍCULOS CON MAYOR ACTIVIDAD EN VACÍO',
+                        font: { size: 18 }
+                    }
                 }
             }
         });
     };
 
-    // --- 3. EXPORTACIÓN A EXCEL (FLOTA COMPLETA) ---
+    // --- 3. EXPORTACIÓN A EXCEL ---
     const descargarExcel = () => {
-        if (todosLosDatosParaExcel.length === 0) {
-            alert("No hay datos para exportar. Por favor, actualiza los datos primero.");
-            return;
-        }
-
+        if (todosLosDatosParaExcel.length === 0) return alert("No hay datos");
         const dataExcel = todosLosDatosParaExcel.map(d => ({
-            "Vehículo": d.nombre,
-            "Viajes/Registros Vacío": d.enVacio,
-            "Viajes/Registros Carga": d.conCarga,
-            "Total Mediciones": d.totalRegistros,
-            "% Eficiencia": ((d.conCarga / d.totalRegistros) * 100).toFixed(2) + "%"
+            "Matrícula/Vehículo": d.nombre,
+            "Registros Vacío": d.enVacio,
+            "Registros Carga": d.conCarga,
+            "% Eficiencia": ((d.conCarga / (d.conCarga + d.enVacio)) * 100).toFixed(2) + "%"
         }));
-
         const ws = XLSX.utils.json_to_sheet(dataExcel);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Eficiencia Logística");
-        XLSX.writeFile(wb, "Reporte_Completo_Carga_Flota.xlsx");
+        XLSX.utils.book_append_sheet(wb, ws, "Reporte");
+        XLSX.writeFile(wb, "Analisis_Carga_Completo.xlsx");
     };
 
-    // --- 4. LLAMADA A LA API ---
+    // --- 4. CARGA DE DATOS ---
     const cargarDatos = () => {
         const fromDate = document.getElementById('dateFrom').value + "T00:00:00.000Z";
         const toDate = document.getElementById('dateTo').value + "T23:59:59.000Z";
-
-        console.log("Cargando datos desde:", fromDate, "hasta:", toDate);
 
         api.multiCall([
             ["Get", { typeName: "Device" }],
@@ -127,32 +126,21 @@ geotab.addin.miDashboard = function (api, state) {
             }]
         ], (results) => {
             procesarDatos(results[0], results[1]);
-        }, (err) => {
-            console.error("Error en MultiCall:", err);
-            alert("Error al obtener datos de Geotab");
-        });
+        }, (err) => console.error(err));
     };
 
-    // --- 5. CICLO DE VIDA ---
     return {
         initialize: function (api, state, callback) {
-            // Fechas por defecto: últimos 30 días
             const hoy = new Date();
             const hace30 = new Date();
             hace30.setDate(hoy.getDate() - 30);
-            
             document.getElementById('dateTo').value = hoy.toISOString().split('T')[0];
             document.getElementById('dateFrom').value = hace30.toISOString().split('T')[0];
-
-            // Listeners
             document.getElementById('updateBtn').onclick = cargarDatos;
             document.getElementById('exportBtn').onclick = descargarExcel;
-
             if (callback) callback();
         },
-        focus: function (api, state) {
-            cargarDatos();
-        },
+        focus: function () { cargarDatos(); },
         blur: function () {}
     };
 };
