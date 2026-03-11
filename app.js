@@ -2,35 +2,94 @@ geotab.addin.miDashboard = function (api, state) {
     let chartVacioInst = null;
     let chartIdleInst = null;
 
-    // --- CÁLCULO DE RALENTÍ ---
-    const procesarRalenti = (viajes) => {
-        let ralentiPorZona = {};
-        const PRECIO_L = 1.45; 
-        const CONSUMO_H = 2.5;
-
-        viajes.forEach(v => {
-            if (v.idlingDuration) {
-                // Obtenemos nombre de zona si existe
-                let zona = (v.stopPoint && v.stopPoint.zones && v.stopPoint.zones.length > 0) 
-                    ? v.stopPoint.zones[0].name 
-                    : "Fuera de Zona / Cliente";
-                
-                // Duración en horas (Geotab suele enviar TimeSpan como string o segundos)
-                let horas = v.idlingDuration.totalSeconds ? (v.idlingDuration.totalSeconds / 3600) : 0;
-                if (!ralentiPorZona[zona]) ralentiPorZona[zona] = 0;
-                ralentiPorZona[zona] += horas;
-            }
-        });
-
-        let datos = Object.keys(ralentiPorZona)
-            .map(z => ({ zona: z, horas: ralentiPorZona[z] }))
-            .sort((a, b) => b.horas - a.horas).slice(0, 5);
-
-        dibujarGraficoIdle(datos);
-        dibujarTablaIdle(datos, PRECIO_L, CONSUMO_H);
+    const showLoader = (id, show) => {
+        document.getElementById(id).style.display = show ? 'flex' : 'none';
     };
 
-    const dibujarGraficoIdle = (datos) => {
+    const updateStatus = (msg) => {
+        document.getElementById('global-status').innerText = msg;
+    };
+
+    // --- PASO 1: KM Y EFICIENCIA ---
+    const cargarKilometrosYEficiencia = (fromDate, toDate, next) => {
+        showLoader('loader-km', true);
+        updateStatus("Paso 1/2: Obteniendo KM y Pesos...");
+
+        api.multiCall([
+            ["Get", { typeName: "Device" }],
+            ["Get", { typeName: "StatusData", search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate, toDate } }],
+            ["Get", { typeName: "Trip", search: { fromDate, toDate } }]
+        ], (results) => {
+            const [dispositivos, pesos, viajes] = results;
+            
+            let stats = dispositivos.map(d => {
+                let kmVacio = 0, kmCarga = 0;
+                let pesosV = pesos.filter(p => p.device.id === d.id);
+                viajes.filter(v => v.device.id === d.id).forEach(v => {
+                    let p = pesosV.filter(p => new Date(p.dateTime) <= new Date(v.stop)).pop();
+                    if (p && (p.data / 1000) >= 20000) kmCarga += v.distance;
+                    else kmVacio += v.distance;
+                });
+                return { nombre: d.name, kmV: kmVacio, kmC: kmCarga };
+            }).filter(s => (s.kmV + s.kmC) > 0).sort((a,b) => b.kmV - a.kmV);
+
+            renderModuloKM(stats);
+            showLoader('loader-km', false);
+            next(); // Llama al siguiente paso
+        }, (e) => { console.error(e); showLoader('loader-km', false); });
+    };
+
+    // --- PASO 2: RALENTÍ ---
+    const cargarRalenti = (fromDate, toDate) => {
+        showLoader('loader-idle', true);
+        updateStatus("Paso 2/2: Analizando Ralentí por Zona...");
+
+        api.call("Get", {
+            typeName: "Trip",
+            search: { fromDate, toDate }
+        }, (viajes) => {
+            let ralenti = {};
+            viajes.forEach(v => {
+                if (v.idlingDuration) {
+                    let zona = (v.stopPoint && v.stopPoint.zones && v.stopPoint.zones.length > 0) ? v.stopPoint.zones[0].name : "Sin Zona Definida";
+                    let horas = v.idlingDuration.totalSeconds ? (v.idlingDuration.totalSeconds / 3600) : 0;
+                    ralenti[zona] = (ralenti[zona] || 0) + horas;
+                }
+            });
+
+            let datos = Object.keys(ralenti).map(z => ({ zona: z, horas: ralenti[z] }))
+                .sort((a,b) => b.horas - a.horas).slice(0, 5);
+
+            renderModuloIdle(datos);
+            showLoader('loader-idle', false);
+            updateStatus("¡Dashboard Actualizado!");
+        }, (e) => { console.error(e); showLoader('loader-idle', false); });
+    };
+
+    // --- RENDERIZADO ---
+    const renderModuloKM = (datos) => {
+        const ctx = document.getElementById('chartVacio').getContext('2d');
+        if (chartVacioInst) chartVacioInst.destroy();
+        const top10 = datos.slice(0, 10);
+        chartVacioInst = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: top10.map(d => d.nombre),
+                datasets: [
+                    { label: 'KM Vacío', data: top10.map(d => Math.round(d.kmV)), backgroundColor: '#e74c3c' },
+                    { label: 'KM Carga', data: top10.map(d => Math.round(d.kmC)), backgroundColor: '#2ecc71' }
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } }
+        });
+
+        document.getElementById('tablaCuerpo').innerHTML = datos.slice(0, 15).map(d => {
+            let ef = ((d.kmC / (d.kmV + d.kmC)) * 100).toFixed(1);
+            return `<tr><td>${d.nombre}</td><td class="num">${Math.round(d.kmV)}</td><td>${ef}%</td></tr>`;
+        }).join('');
+    };
+
+    const renderModuloIdle = (datos) => {
         const ctx = document.getElementById('chartIdle').getContext('2d');
         if (chartIdleInst) chartIdleInst.destroy();
         chartIdleInst = new Chart(ctx, {
@@ -39,46 +98,35 @@ geotab.addin.miDashboard = function (api, state) {
                 labels: datos.map(d => d.zona),
                 datasets: [{ data: datos.map(d => d.horas.toFixed(2)), backgroundColor: ['#e67e22','#d35400','#f39c12','#e74c3c','#95a5a6'] }]
             },
-            options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+            options: { maintainAspectRatio: false }
+        });
+
+        document.getElementById('idleTablaCuerpo').innerHTML = datos.map(d => `
+            <tr><td>${d.zona}</td><td class="num">${d.horas.toFixed(2)}h</td><td class="num">${(d.horas * 2.5 * 1.45).toFixed(2)}€</td></tr>
+        `).join('');
+    };
+
+    const iniciarCargaSecuencial = () => {
+        const fromDate = document.getElementById('dateFrom').value + "T00:00:00.000Z";
+        const toDate = document.getElementById('dateTo').value + "T23:59:59.000Z";
+        
+        // Ejecución en cadena
+        cargarKilometrosYEficiencia(fromDate, toDate, () => {
+            cargarRalenti(fromDate, toDate);
         });
     };
-
-    const dibujarTablaIdle = (datos, precio, consumo) => {
-        const cuerpo = document.getElementById('idleTablaCuerpo');
-        cuerpo.innerHTML = datos.map(d => `
-            <tr>
-                <td><strong>${d.zona}</strong></td>
-                <td class="num">${d.horas.toFixed(2)} h</td>
-                <td class="num" style="color:#c0392b; font-weight:bold;">${(d.horas * consumo * precio).toFixed(2)} €</td>
-            </tr>`).join('');
-    };
-
-    // --- MÉTODOS DE CARGA (KM Y EFICIENCIA) ---
-    // (Se mantienen las funciones obtenerDatos, dibujarGrafico y dibujarTabla de la v1.0.10)
 
     return {
         initialize: function (api, state, callback) {
             const hoy = new Date().toISOString().split('T')[0];
-            ['vacioTo', 'tablaTo', 'idleTo'].forEach(id => document.getElementById(id).value = hoy);
-            
             const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30);
-            const inicio = hace30.toISOString().split('T')[0];
-            ['vacioFrom', 'tablaFrom', 'idleFrom'].forEach(id => document.getElementById(id).value = inicio);
-
-            // Listeners
-            document.getElementById('idleUpdate').onclick = () => {
-                const fromDate = document.getElementById('idleFrom').value + "T00:00:00.000Z";
-                const toDate = document.getElementById('idleTo').value + "T23:59:59.000Z";
-                api.call("Get", { typeName: "Trip", search: { fromDate, toDate } }, (v) => procesarRalenti(v));
-            };
-
-            // ... Añadir aquí los otros listeners de vacioUpdate y tablaUpdate ...
+            
+            document.getElementById('dateTo').value = hoy;
+            document.getElementById('dateFrom').value = hace30.toISOString().split('T')[0];
+            document.getElementById('btnUpdateMain').onclick = iniciarCargaSecuencial;
 
             if (typeof callback === 'function') callback();
         },
-        focus: function () { 
-            document.getElementById('idleUpdate').click();
-            // ... Otros clicks automáticos ...
-        }
+        focus: function () { iniciarCargaSecuencial(); }
     };
 };
