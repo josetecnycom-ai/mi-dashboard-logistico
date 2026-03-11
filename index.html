@@ -2,43 +2,82 @@
 <html lang="es">
 <head>
     <meta charset="utf-8">
-    <title>Dashboard Logístico v1.0.7</title>
+    <title>Dashboard Logístico v1.0.8</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
-        body { font-family: sans-serif; background: #f4f7f9; padding: 15px; }
-        .controls { 
-            background: white; padding: 15px; border-radius: 8px; 
-            margin-bottom: 15px; display: flex; gap: 10px; align-items: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .card { 
-            background: white; padding: 20px; border-radius: 8px; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            overflow-x: auto; /* Permite scroll si el gráfico es ancho */
-        }
-        .chart-container { 
-            position: relative; 
-            height: 500px; 
-            min-width: 1000px; /* Forzamos ancho para que las barras respiren */
-        }
-        button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 4px; background: #004682; color: white; font-weight: bold; }
-        #version-tag { font-size: 11px; color: #999; margin-left: auto; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; padding: 20px; margin: 0; }
+        .dashboard-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); padding: 20px; overflow: hidden; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 15px; flex-wrap: wrap; gap: 10px; }
+        .card-title { font-size: 1.1rem; font-weight: bold; color: #333; margin: 0; }
+        .controls { display: flex; gap: 8px; align-items: center; }
+        .chart-container { position: relative; height: 450px; width: 100%; }
+        
+        /* Estilos de Tabla */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th { background: #f8f9fa; text-align: left; padding: 12px; border-bottom: 2px solid #dee2e6; color: #495057; }
+        td { padding: 12px; border-bottom: 1px solid #eee; color: #333; }
+        .percentage-bar { background: #e9ecef; border-radius: 4px; height: 8px; width: 100px; display: inline-block; margin-right: 10px; }
+        .percentage-fill { background: #2ecc71; height: 100%; border-radius: 4px; }
+
+        button { padding: 8px 12px; cursor: pointer; border: none; border-radius: 6px; font-weight: 600; font-size: 0.85rem; transition: 0.2s; }
+        .btn-update { background: #004682; color: white; }
+        .btn-excel { background: #27ae60; color: white; }
+        button:hover { opacity: 0.85; transform: translateY(-1px); }
+        input[type="date"] { padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem; }
+        #version-tag { position: fixed; bottom: 10px; right: 10px; font-size: 10px; color: #aaa; }
     </style>
 </head>
 <body>
-    <div class="controls">
-        <input type="date" id="dateFrom">
-        <input type="date" id="dateTo">
-        <button id="updateBtn">Actualizar</button>
-        <button id="exportBtn" style="background:#27ae60">Excel</button>
-        <span id="version-tag">v1.0.7</span>
-    </div>
-    <div class="card">
-        <div class="chart-container">
-            <canvas id="graficoRanking"></canvas>
+
+    <div class="dashboard-grid">
+        
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Top 10: Kilómetros en Vacío</h2>
+                <div class="controls">
+                    <input type="date" id="vacioFrom">
+                    <input type="date" id="vacioTo">
+                    <button class="btn-update" id="vacioUpdate">Actualizar</button>
+                    <button class="btn-excel" id="vacioExcel">Excel</button>
+                </div>
+            </div>
+            <div class="chart-container">
+                <canvas id="chartVacio"></canvas>
+            </div>
         </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Resumen de Eficiencia por Vehículo</h2>
+                <div class="controls">
+                    <input type="date" id="tablaFrom">
+                    <input type="date" id="tablaTo">
+                    <button class="btn-update" id="tablaUpdate">Actualizar</button>
+                    <button class="btn-excel" id="tablaExcel">Excel</button>
+                </div>
+            </div>
+            <div id="tableContainer">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Vehículo</th>
+                            <th>KM Vacío</th>
+                            <th>KM Carga</th>
+                            <th>Total</th>
+                            <th>Eficiencia (%)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tablaCuerpo">
+                        </tbody>
+                </table>
+            </div>
+        </div>
+
     </div>
+
+    <span id="version-tag">v1.0.8</span>
     <script src="app.js"></script>
 </body>
 </html>
