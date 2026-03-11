@@ -1,17 +1,18 @@
 geotab.addin.miDashboard = function (api, state) {
     let chartKmObj = null, chartIdleObj = null;
     let dataKm = [], dataIdle = [];
+    let masterZones = {}; // Mapa para guardar ID -> Nombre de Zona
 
-    const toggleLoad = (id, show) => document.getElementById(id).style.display = show ? 'flex' : 'none';
+    const toggleL = (id, s) => document.getElementById(id).style.display = s ? 'flex' : 'none';
 
-    const toHHmm = (decimalHours) => {
-        const totalSecs = Math.round(decimalHours * 3600);
-        const h = Math.floor(totalSecs / 3600);
-        const m = Math.floor((totalSecs % 3600) / 60);
+    const formatTime = (decimalHours) => {
+        const totalMinutes = Math.round(decimalHours * 60);
+        const h = Math.floor(totalMinutes / 60);
+        const m = totalMinutes % 60;
         return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
     };
 
-    const parseSeconds = (ts) => {
+    const getSecs = (ts) => {
         if (!ts) return 0;
         if (typeof ts === 'number') return ts;
         if (ts.totalSeconds) return ts.totalSeconds;
@@ -22,122 +23,139 @@ geotab.addin.miDashboard = function (api, state) {
         return 0;
     };
 
-    const ejecutarProceso = () => {
-        const from = document.getElementById('dateFrom').value + "T00:00:00.000Z";
-        const to = document.getElementById('dateTo').value + "T23:59:59.000Z";
+    const procesarTodo = () => {
+        const f = document.getElementById('dateFrom').value + "T00:00:00.000Z";
+        const t = document.getElementById('dateTo').value + "T23:59:59.000Z";
         
-        toggleLoad('load-km', true);
-        toggleLoad('load-idle', true);
+        toggleL('load-km', true);
+        toggleL('load-idle', true);
 
-        // LLAMADA MAESTRA: Traemos todo de una vez
+        // Paso 1: Obtener dispositivos, pesos, viajes y la lista de Zonas
         api.multiCall([
             ["Get", { typeName: "Device" }],
-            ["Get", { typeName: "StatusData", search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate: from, toDate: to } }],
-            ["Get", { typeName: "Trip", search: { fromDate: from, toDate: to } }],
-            ["Get", { typeName: "Exception", search: { ruleSearch: { id: "RuleZoneStopId" }, fromDate: from, toDate: to } }]
+            ["Get", { typeName: "StatusData", search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate: f, toDate: t } }],
+            ["Get", { typeName: "Trip", search: { fromDate: f, toDate: t } }],
+            ["Get", { typeName: "Zone" }]
         ], (results) => {
-            const [devices, weights, trips, exceptions] = results;
+            const [devices, weights, trips, zones] = results;
+            
+            // Guardamos las zonas en un mapa para acceso rápido
+            masterZones = {};
+            zones.forEach(z => { masterZones[z.id] = z.name; });
 
-            // 1. PROCESAR KM Y EFICIENCIA
+            // 1. Lógica de KM y Eficiencia
             dataKm = devices.map(d => {
-                let vK = 0, cK = 0;
+                let vk = 0, ck = 0;
                 let dWeights = weights.filter(w => w.device.id === d.id);
-                trips.filter(t => t.device.id === d.id).forEach(t => {
-                    let lastW = dWeights.filter(w => new Date(w.dateTime) <= new Date(t.stop)).pop();
-                    if (lastW && (lastW.data / 1000) >= 20000) cK += t.distance; else vK += t.distance;
+                trips.filter(tr => tr.device.id === d.id).forEach(tr => {
+                    let w = dWeights.filter(dw => new Date(dw.dateTime) <= new Date(tr.stop)).pop();
+                    if (w && (w.data / 1000) >= 20000) ck += tr.distance; else vk += tr.distance;
                 });
-                return { name: d.name, vk: Math.round(vK), ck: Math.round(cK), ef: ((cK/(vK+cK+0.1))*100).toFixed(1) + "%" };
+                return { name: d.name, vk: Math.round(vk), ck: Math.round(ck), ef: ((ck/(vk+ck+0.1))*100).toFixed(1) + "%" };
             }).filter(i => (i.vk + i.ck) > 0).sort((a,b) => b.vk - a.vk);
 
             renderKM(dataKm);
-            toggleLoad('load-km', false);
+            toggleL('load-km', false);
 
-            // 2. PROCESAR RALENTÍ POR ZONA (MÉTODO EXCEPCIONES)
-            let zonesResumen = {};
-            trips.filter(t => parseSeconds(t.idlingDuration) > 0).forEach(t => {
-                let idlingHr = parseSeconds(t.idlingDuration) / 3600;
-                let stopTime = new Date(t.stop).getTime();
-                
-                // Buscamos si existe una excepción de ZoneStop que coincida con el fin del viaje
-                let match = exceptions.find(e => 
-                    e.device.id === t.device.id && 
-                    Math.abs(new Date(e.activeFrom).getTime() - stopTime) < 5000 // 5 segundos de margen
-                );
+            // 2. Lógica de Ralentí por Zona (Reverse Geocoding con IDs de zona)
+            let idleTrips = trips.filter(tr => getSecs(tr.idlingDuration) > 0 && tr.stopPoint);
+            if (idleTrips.length === 0) {
+                renderIdle([]);
+                toggleL('load-idle', false);
+                return;
+            }
 
-                let zName = match ? (match.rule.name || "Zona") : "Fuera de Zona";
-                // Limpieza de nombre si Geotab añade prefijos
-                zName = zName.replace("Zone Stop: ", "").replace("Parada en zona: ", "");
-                
-                zonesResumen[zName] = (zonesResumen[zName] || 0) + idlingHr;
+            let coordsMap = new Map();
+            idleTrips.forEach(tr => {
+                let key = tr.stopPoint.x.toFixed(4) + "," + tr.stopPoint.y.toFixed(4);
+                tr._ckey = key;
+                if (!coordsMap.has(key)) coordsMap.set(key, { x: tr.stopPoint.x, y: tr.stopPoint.y });
             });
 
-            dataIdle = Object.keys(zonesResumen).map(z => ({
-                zona: z,
-                valor: zonesResumen[z],
-                formato: toHHmm(zonesResumen[z])
-            })).sort((a,b) => b.valor - a.valor);
+            let uCoords = Array.from(coordsMap.values());
+            let geoCalls = [];
+            for (let i = 0; i < uCoords.length; i += 400) {
+                geoCalls.push(["GetAddresses", { coordinates: uCoords.slice(i, i + 400) }]);
+            }
 
-            renderIdle(dataIdle);
-            toggleLoad('load-idle', false);
+            api.multiCall(geoCalls, (geoResults) => {
+                let allAddrs = [].concat(...geoResults);
+                let resolver = new Map();
 
-        }, (err) => { console.error(err); alert("Error en API Geotab"); });
+                Array.from(coordsMap.keys()).forEach((key, index) => {
+                    let addr = allAddrs[index];
+                    let zName = "Fuera de Zona";
+                    // Si Geotab detecta zonas, buscamos el nombre en nuestra masterZones
+                    if (addr && addr.zones && addr.zones.length > 0) {
+                        let zId = addr.zones[0].id;
+                        zName = masterZones[zId] || addr.zones[0].name || "Zona Sin Nombre";
+                    }
+                    resolver.set(key, zName);
+                });
+
+                let resumen = {};
+                idleTrips.forEach(tr => {
+                    let z = resolver.get(tr._ckey) || "Fuera de Zona";
+                    resumen[z] = (resumen[z] || 0) + (getSecs(tr.idlingDuration) / 3600);
+                });
+
+                dataIdle = Object.keys(resumen).map(k => ({
+                    zona: k,
+                    val: resumen[k],
+                    txt: formatTime(resumen[k])
+                })).sort((a,b) => b.val - a.val);
+
+                renderIdle(dataIdle);
+                toggleL('load-idle', false);
+            });
+
+        }, (e) => { 
+            console.error(e); 
+            alert("Error en la conexión con MyGeotab. Revisa los permisos."); 
+            toggleL('load-km', false); toggleL('load-idle', false);
+        });
     };
 
-    const renderKM = (datos) => {
+    const renderKM = (d) => {
         const ctx = document.getElementById('chart-km').getContext('2d');
         if (chartKmObj) chartKmObj.destroy();
         chartKmObj = new Chart(ctx, {
             type: 'bar',
-            data: { 
-                labels: datos.slice(0,10).map(i => i.name),
-                datasets: [
-                    { label: 'KM Vacío', data: datos.slice(0,10).map(i => i.vk), backgroundColor: '#e74c3c' },
-                    { label: 'KM Carga', data: datos.slice(0,10).map(i => i.ck), backgroundColor: '#2ecc71' }
-                ]
-            },
-            options: { responsive: true, maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } }
+            data: { labels: d.slice(0,10).map(i => i.name), datasets: [{ label: 'KM Vacío', data: d.slice(0,10).map(i => i.vk), backgroundColor: '#e74c3c' }, { label: 'KM Carga', data: d.slice(0,10).map(i => i.ck), backgroundColor: '#2ecc71' }] },
+            options: { maintainAspectRatio: false, scales: { x: { stacked: true }, y: { stacked: true } } }
         });
-        document.getElementById('body-km').innerHTML = datos.slice(0,15).map(i => `<tr><td>${i.name}</td><td class="num">${i.vk}</td><td class="num">${i.ef}</td></tr>`).join('');
+        document.getElementById('body-km').innerHTML = d.slice(0,15).map(i => `<tr><td>${i.name}</td><td class="num">${i.vk}</td><td class="num">${i.ef}</td></tr>`).join('');
     };
 
-    const renderIdle = (datos) => {
+    const renderIdle = (d) => {
         const ctx = document.getElementById('chart-idle').getContext('2d');
         if (chartIdleObj) chartIdleObj.destroy();
-        const top5 = datos.slice(0, 5);
         chartIdleObj = new Chart(ctx, {
             type: 'doughnut',
-            data: {
-                labels: top5.map(i => i.zona),
-                datasets: [{ data: top5.map(i => i.valor.toFixed(2)), backgroundColor: ['#3498db', '#27ae60', '#f1c40f', '#e67e22', '#95a5a6'] }]
-            },
+            data: { labels: d.slice(0,5).map(i => i.zona), datasets: [{ data: d.slice(0,5).map(i => i.val.toFixed(2)), backgroundColor: ['#2780e3', '#27ae60', '#f1c40f', '#e67e22', '#95a5a6'] }] },
             options: { maintainAspectRatio: false }
         });
-        document.getElementById('body-idle').innerHTML = datos.map(i => `<tr><td><strong>${i.zona}</strong></td><td class="num">${i.formato}</td></tr>`).join('');
+        document.getElementById('body-idle').innerHTML = d.map(i => `<tr><td><strong>${i.zona}</strong></td><td class="num">${i.txt}</td></tr>`).join('');
     };
 
     return {
         initialize: function (api, state, callback) {
-            const hoy = new Date().toISOString().split('T')[0];
-            document.getElementById('dateTo').value = hoy;
-            document.getElementById('dateFrom').value = hoy;
-            document.getElementById('btnRun').onclick = ejecutarProceso;
-            
+            const h = new Date().toISOString().split('T')[0];
+            document.getElementById('dateTo').value = h;
+            document.getElementById('dateFrom').value = h;
+            document.getElementById('btnRun').onclick = procesarTodo;
             document.getElementById('xlsx-km').onclick = () => {
                 const ws = XLSX.utils.json_to_sheet(dataKm);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "KM");
+                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "KM");
                 XLSX.writeFile(wb, "Reporte_KM.xlsx");
             };
-            
             document.getElementById('xlsx-idle').onclick = () => {
-                const ws = XLSX.utils.json_to_sheet(dataIdle.map(i => ({ Zona: i.zona, Tiempo: i.formato })));
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Ralenti");
+                const ws = XLSX.utils.json_to_sheet(dataIdle.map(i => ({ Zona: i.zona, Tiempo: i.txt })));
+                const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Ralenti");
                 XLSX.writeFile(wb, "Reporte_Ralenti.xlsx");
             };
-
             callback();
         },
-        focus: function () { ejecutarProceso(); }
+        focus: function () { procesarTodo(); }
     };
 };
