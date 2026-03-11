@@ -1,22 +1,124 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
     <meta charset="utf-8">
-    <title>Dashboard Logístico</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Logístico Pro</title>
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <style>
-        body { font-family: Arial, sans-serif; padding: 20px; }
-        .chart-container { width: 400px; margin: 20px auto; }
-        h1 { text-align: center; color: #333; }
+        /* Estilos base inspirados en la interfaz de Geotab */
+        body {
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f9;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #004682;
+            padding-bottom: 10px;
+        }
+
+        .dashboard-header h1 {
+            margin: 0;
+            color: #004682;
+            font-size: 24px;
+        }
+
+        /* Contenedor de Cuadrícula para los Gráficos */
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        /* Estilo de "Tarjeta" para cada KPI */
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .card h2 {
+            margin-top: 0;
+            font-size: 18px;
+            color: #555;
+            align-self: flex-start;
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+
+        /* Mensaje de carga inicial */
+        #loading-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
-    <h1>Estado de Carga de la Flota</h1>
-    
-    <div class="chart-container">
-        <canvas id="graficoCarga"></canvas>
-    </div>
+
+    <div id="loading-overlay">Cargando Dashboard Geotab...</div>
+
+    <header class="dashboard-header">
+        <h1>Dashboard Logístico de Flota</h1>
+        <div id="last-update" style="font-size: 12px; color: #777;">Actualizado: Recién</div>
+    </header>
+
+    <main class="grid-container">
+        
+        <section class="card">
+            <h2>Utilización de Carga (Peso Bruto)</h2>
+            <div class="chart-wrapper">
+                <canvas id="graficoCarga"></canvas>
+            </div>
+            <p style="font-size: 12px; color: #888; margin-top: 10px;">
+                Basado en diagnóstico: Peso combinado genérico.
+            </p>
+        </section>
+
+        <section class="card">
+            <h2>Distribución de Ralentí (Próximamente)</h2>
+            <div id="map-placeholder" style="height: 300px; width: 100%; background: #eee; display: flex; justify-content: center; align-items: center; border-radius: 4px;">
+                <span style="color: #999;">Aquí configuraremos el mapa de calor</span>
+            </div>
+        </section>
+
+    </main>
 
     <script src="app.js"></script>
+
+    <script>
+        // Pequeño script para quitar el mensaje de carga 
+        // Este evento se dispara cuando todo el DOM está listo
+        window.addEventListener('load', function() {
+            setTimeout(() => {
+                const overlay = document.getElementById('loading-overlay');
+                if(overlay) overlay.style.display = 'none';
+            }, 500);
+        });
+    </script>
 </body>
 </html>
