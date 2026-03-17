@@ -94,16 +94,55 @@ geotab.addin.miDashboard = function (api, state) {
     };
 
     const ejecutarLlamadaMaestra = () => {
-        const f = document.getElementById('dateFrom').value + "T00:00:00.000Z";
-        const t = document.getElementById('dateTo').value + "T23:59:59.000Z";
+        const fStr = document.getElementById('dateFrom').value + "T00:00:00.000Z";
+        const tStr = document.getElementById('dateTo').value + "T23:59:59.000Z";
         toggleL('load-km', true); toggleL('load-idle', true); toggleL('load-uso', true);
         
-        api.multiCall([
+        // --- NUEVA LÓGICA DE CHUNKING PARA EVITAR LÍMITES DE LA API ---
+        let fromDate = new Date(fStr);
+        let finalToDate = new Date(tStr);
+        let dateChunks = [];
+        
+        // Dividimos el periodo en bloques de 3 días para el peso
+        while (fromDate < finalToDate) {
+            let nextTo = new Date(fromDate);
+            nextTo.setDate(nextTo.getDate() + 3); 
+            if (nextTo > finalToDate) nextTo = finalToDate;
+            
+            dateChunks.push({ f: fromDate.toISOString(), t: nextTo.toISOString() });
+            fromDate = new Date(nextTo.getTime() + 1); // Sumar 1ms para no solapar llamadas
+        }
+
+        // Llamadas base que no suelen truncarse tan rápido
+        let calls = [
             ["Get", { typeName: "Device" }],
-            ["Get", { typeName: "StatusData", search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate: f, toDate: t } }],
-            ["Get", { typeName: "Trip", search: { fromDate: f, toDate: t } }],
+            ["Get", { typeName: "Trip", search: { fromDate: fStr, toDate: tStr } }],
             ["Get", { typeName: "Zone" }]
-        ], procesarDatos);
+        ];
+        
+        // Añadimos una llamada de StatusData por cada bloque de 3 días que hemos calculado
+        dateChunks.forEach(chunk => {
+            calls.push(["Get", { typeName: "StatusData", search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate: chunk.f, toDate: chunk.t } }]);
+        });
+
+        // Ejecutamos todo de golpe. La API de Geotab soporta llamadas múltiples sin problema.
+        api.multiCall(calls, (results) => {
+            const devices = results[0];
+            const trips = results[1];
+            const zones = results[2];
+            
+            // Unir todos los fragmentos de peso (desde la posición 3 en adelante del multiCall)
+            let weights = [];
+            for (let i = 3; i < results.length; i++) {
+                weights = weights.concat(results[i]);
+            }
+            
+            // Enviamos los datos a tu función original en el mismo formato que ya esperaba
+            procesarDatos([devices, weights, trips, zones]);
+        }, (error) => {
+            console.error("Error en la descarga de datos:", error);
+            alert("Hubo un error contactando con Geotab. Intenta refrescar la página.");
+        });
     };
 
     // FUNCIONES DE RENDERIZADO VISUAL
