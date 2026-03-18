@@ -98,50 +98,53 @@ geotab.addin.miDashboard = function (api, state) {
         const tStr = document.getElementById('dateTo').value + "T23:59:59.000Z";
         toggleL('load-km', true); toggleL('load-idle', true); toggleL('load-uso', true);
         
-        // --- NUEVA LÓGICA DE CHUNKING PARA EVITAR LÍMITES DE LA API ---
+        // --- NUEVA LÓGICA DE CHUNKING DIARIO PARA FLOTAS MASIVAS ---
         let fromDate = new Date(fStr);
         let finalToDate = new Date(tStr);
         let dateChunks = [];
         
-        // Dividimos el periodo en bloques de 3 días para el peso
+        // Dividimos en bloques de 1 DÍA (evita el límite de 50k de la API en flotas de +300)
         while (fromDate < finalToDate) {
             let nextTo = new Date(fromDate);
-            nextTo.setDate(nextTo.getDate() + 3); 
+            nextTo.setDate(nextTo.getDate() + 1); 
             if (nextTo > finalToDate) nextTo = finalToDate;
             
             dateChunks.push({ f: fromDate.toISOString(), t: nextTo.toISOString() });
             fromDate = new Date(nextTo.getTime() + 1); // Sumar 1ms para no solapar llamadas
         }
 
-        // Llamadas base que no suelen truncarse tan rápido
+        // Llamadas base: Dispositivos y Zonas (Estos rara vez llegan a 50k registros)
         let calls = [
             ["Get", { typeName: "Device" }],
-            ["Get", { typeName: "Trip", search: { fromDate: fStr, toDate: tStr } }],
             ["Get", { typeName: "Zone" }]
         ];
         
-        // Añadimos una llamada de StatusData por cada bloque de 3 días que hemos calculado
+        // Por CADA DÍA, añadimos una llamada para Viajes y otra para Pesos
         dateChunks.forEach(chunk => {
+            calls.push(["Get", { typeName: "Trip", search: { fromDate: chunk.f, toDate: chunk.t } }]);
             calls.push(["Get", { typeName: "StatusData", search: { diagnosticSearch: { id: "aVrWeoUlmHE2AXsV_j0Kc7g" }, fromDate: chunk.f, toDate: chunk.t } }]);
         });
 
-        // Ejecutamos todo de golpe. La API de Geotab soporta llamadas múltiples sin problema.
+        // Ejecutamos todo de golpe
         api.multiCall(calls, (results) => {
             const devices = results[0];
-            const trips = results[1];
-            const zones = results[2];
+            const zones = results[1];
             
-            // Unir todos los fragmentos de peso (desde la posición 3 en adelante del multiCall)
-            let weights = [];
-            for (let i = 3; i < results.length; i++) {
-                weights = weights.concat(results[i]);
+            let allTrips = [];
+            let allWeights = [];
+            
+            // Los resultados a partir de la posición 2 vienen en pares: [Viajes Día 1, Pesos Día 1, Viajes Día 2, Pesos Día 2...]
+            for (let i = 2; i < results.length; i += 2) {
+                allTrips = allTrips.concat(results[i]);
+                allWeights = allWeights.concat(results[i + 1]);
             }
             
-            // Enviamos los datos a tu función original en el mismo formato que ya esperaba
-            procesarDatos([devices, weights, trips, zones]);
+            // Enviamos todo a procesar como si hubiera sido una sola llamada
+            procesarDatos([devices, allWeights, allTrips, zones]);
         }, (error) => {
-            console.error("Error en la descarga de datos:", error);
-            alert("Hubo un error contactando con Geotab. Intenta refrescar la página.");
+            console.error("Error en la descarga masiva:", error);
+            alert("Hubo un error de red contactando con Geotab. Revisa la consola.");
+            toggleL('load-km', false); toggleL('load-idle', false); toggleL('load-uso', false);
         });
     };
 
